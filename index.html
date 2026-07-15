@@ -267,6 +267,60 @@ body {
 }
 .toast.show { transform: translateX(-50%) translateY(0); }
 
+/* ===== CHAT PANEL ===== */
+.chat-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 250;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; pointer-events: none; transition: opacity 0.2s;
+}
+.chat-overlay.open { opacity: 1; pointer-events: all; }
+.chat-panel {
+  background: var(--surface); border-radius: var(--radius); width: 100%; max-width: 420px;
+  height: 80vh; display: flex; flex-direction: column; overflow: hidden;
+  transform: scale(0.95); transition: transform 0.2s;
+}
+.chat-overlay.open .chat-panel { transform: scale(1); }
+.chat-header {
+  padding: 14px 16px; display: flex; align-items: center; justify-content: space-between;
+  border-bottom: 1px solid var(--border); font-weight: 700; font-size: 15px;
+}
+.chat-close {
+  width: 32px; height: 32px; border-radius: 50%; background: var(--bg);
+  border: 1px solid var(--border); color: var(--text); cursor: pointer;
+  font-size: 14px; display: flex; align-items: center; justify-content: center;
+}
+.chat-messages {
+  flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px;
+}
+.chat-msg {
+  max-width: 85%; padding: 10px 14px; border-radius: var(--radius-sm);
+  font-size: 14px; line-height: 1.4; word-wrap: break-word;
+}
+.chat-msg.user {
+  align-self: flex-end; background: var(--accent); color: #fff;
+  border-bottom-right-radius: 4px;
+}
+.chat-msg.bot {
+  align-self: flex-start; background: var(--bg); border: 1px solid var(--border);
+  border-bottom-left-radius: 4px;
+}
+.chat-msg.bot .msg-name { font-size: 11px; color: var(--accent); font-weight: 700; margin-bottom: 4px; }
+.chat-input-area {
+  padding: 10px 12px; border-top: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px;
+}
+.chat-input {
+  flex: 1; padding: 10px 14px; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 24px; font-size: 14px; color: var(--text); outline: none; font-family: var(--font);
+}
+.chat-input:focus { border-color: var(--accent); }
+.chat-send {
+  width: 40px; height: 40px; border-radius: 50%; background: var(--accent);
+  border: none; color: #fff; font-size: 16px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.chat-send:hover { background: var(--accent-dark); }
+
 /* ===== SETTINGS MODAL ===== */
 .settings-overlay { z-index: 250; }
 
@@ -319,6 +373,7 @@ body {
       </div>
       <div class="header-btn" id="micBtn" onclick="toggleVoice()" title="Голосовой ввод" style="display:none">🎤</div>
       <div class="header-btn" onclick="syncToGitHub()" title="Синхронизировать с VK">🔄</div>
+      <div class="header-btn" onclick="openChat()" title="Чат с Боссом">💬</div>
       <div class="header-btn" onclick="openSettings()" title="Настройки">⚙️</div>
     </div>
   </div>
@@ -507,6 +562,21 @@ body {
 
 <!-- ===== TOAST ===== -->
 <div class="toast" id="toast"></div>
+
+<!-- ===== CHAT PANEL ===== -->
+<div class="chat-overlay" id="chatOverlay" onclick="if(event.target===this)closeChat()">
+  <div class="chat-panel">
+    <div class="chat-header">
+      <span>💬 Чат с Боссом</span>
+      <button class="chat-close" onclick="closeChat()">✕</button>
+    </div>
+    <div class="chat-messages" id="chatMessages"></div>
+    <div class="chat-input-area">
+      <input class="chat-input" id="chatInput" placeholder="Напиши боту..." onkeydown="if(event.key==='Enter')sendChatMessage()">
+      <button class="chat-send" onclick="sendChatMessage()">➤</button>
+    </div>
+  </div>
+</div>
 
 <script>
 // ==================== STATE ====================
@@ -929,14 +999,20 @@ function processVoiceCommand(text) {
   const lower = text.toLowerCase();
   showVoiceSubtitle(text);
 
+  // Добавляем в чат
+  addChatMessage('user', text);
+
   // Команды для просмотра
   if (lower.includes('что у меня') || lower.includes('покажи задачи') || lower.includes('список')) {
     const todayTasks = tasks.filter(t => !t.done && getColumn(t) === 'today');
     if (todayTasks.length) {
       const list = todayTasks.map((t,i) => `${i+1}. ${t.title}`).join(', ');
-      speak(`У тебя ${todayTasks.length} задач на сегодня: ${list}`);
+      const msg = `У тебя ${todayTasks.length} задач на сегодня: ${list}`;
+      speak(msg);
+      addChatMessage('bot', msg);
     } else {
       speak('На сегодня задач нет. Молодец!');
+      addChatMessage('bot', 'На сегодня задач нет. Молодец!');
     }
     return;
   }
@@ -946,9 +1022,12 @@ function processVoiceCommand(text) {
     const urgentTasks = tasks.filter(t => !t.done && t.priority === 'high');
     if (urgentTasks.length) {
       const list = urgentTasks.map((t,i) => `${i+1}. ${t.title}`).join(', ');
-      speak(`Срочных задач: ${urgentTasks.length}. ${list}`);
+      const msg = `Срочных задач: ${urgentTasks.length}. ${list}`;
+      speak(msg);
+      addChatMessage('bot', msg);
     } else {
       speak('Срочных задач нет. Отдыхай!');
+      addChatMessage('bot', 'Срочных задач нет. Отдыхай!');
     }
     return;
   }
@@ -961,16 +1040,21 @@ function processVoiceCommand(text) {
     const tomorrowTasks = tasks.filter(t => !t.done && t.date === tomorrowStr);
     if (tomorrowTasks.length) {
       const list = tomorrowTasks.map((t,i) => `${i+1}. ${t.title}`).join(', ');
-      speak(`На завтра ${tomorrowTasks.length} задач: ${list}`);
+      const msg = `На завтра ${tomorrowTasks.length} задач: ${list}`;
+      speak(msg);
+      addChatMessage('bot', msg);
     } else {
       speak('На завтра задач нет. Свободен!');
+      addChatMessage('bot', 'На завтра задач нет. Свободен!');
     }
     return;
   }
 
   // Мотивация
   if (lower.includes('мотивац') || lower.includes('воодушеви')) {
-    speak(MOTIVATION[Math.floor(Math.random() * MOTIVATION.length)]);
+    const msg = MOTIVATION[Math.floor(Math.random() * MOTIVATION.length)];
+    speak(msg);
+    addChatMessage('bot', msg);
     return;
   }
 
@@ -987,9 +1071,12 @@ function processVoiceCommand(text) {
     if (taskToDelete) {
       tasks = tasks.filter(t => t.id !== taskToDelete.id);
       renderAll();
-      speak(`Задача "${taskToDelete.title}" удалена`);
+      const msg = `Задача "${taskToDelete.title}" удалена`;
+      speak(msg);
+      addChatMessage('bot', msg);
     } else {
       speak('Не нашёл такую задачу. Повтори название.');
+      addChatMessage('bot', 'Не нашёл такую задачу. Повтори название.');
     }
     return;
   }
@@ -1079,8 +1166,10 @@ function processVoiceCommand(text) {
     renderAll();
     const colName = col === 'today' ? 'Сегодня' : col === 'week' ? 'Неделя' : 'Бэклог';
     const timeStr = time ? ` в ${time}` : '';
+    const msg = `Задача добавлена в "${colName}"${timeStr}`;
     toast(`✅ "${title}" → ${colName}${timeStr}`);
-    speak(`Задача добавлена в "${colName}"${timeStr}`);
+    speak(msg);
+    addChatMessage('bot', msg);
     return;
   }
 
@@ -1304,7 +1393,78 @@ ${taskList}
   }
 }
 
-// ==================== AI PANEL TOGGLE ====================
+// ==================== CHAT ====================
+let chatHistory = JSON.parse(localStorage.getItem('zadachnik_chat') || '[]');
+
+function openChat() {
+  document.getElementById('chatOverlay').classList.add('open');
+  renderChat();
+  setTimeout(() => document.getElementById('chatInput').focus(), 200);
+}
+function closeChat() {
+  document.getElementById('chatOverlay').classList.remove('open');
+}
+
+function renderChat() {
+  const el = document.getElementById('chatMessages');
+  if (!chatHistory.length) {
+    el.innerHTML = '<div style="text-align:center;color:var(--text3);padding:40px 16px;font-size:13px">Привет! Я Босс Йоки — твой жёсткий наставник.<br>Напиши мне что-нибудь!</div>';
+    return;
+  }
+  el.innerHTML = chatHistory.map(m => {
+    if (m.role === 'user') {
+      return `<div class="chat-msg user">${esc(m.text)}</div>`;
+    } else {
+      return `<div class="chat-msg bot"><div class="msg-name">Босс</div>${esc(m.text)}</div>`;
+    }
+  }).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+function addChatMessage(role, text) {
+  chatHistory.push({ role, text, time: new Date().toISOString() });
+  // Храним последние 100 сообщений
+  if (chatHistory.length > 100) chatHistory = chatHistory.slice(-100);
+  localStorage.setItem('zadachnik_chat', JSON.stringify(chatHistory));
+  renderChat();
+}
+
+async function sendChatMessage() {
+  const input = document.getElementById('chatInput');
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  addChatMessage('user', text);
+
+  const apiKey = settings.ai_key;
+  if (!apiKey) {
+    addChatMessage('bot', '⚠️ Введи GitHub Token в настройках, чтобы я мог отвечать.');
+    return;
+  }
+
+  try {
+    const systemMsg = SYSTEM_PROMPT + '\n\nТекущие задачи:\n' + getTasksContext() + '\n\nТы общаешься с пользователем в чате. Будь живым, общайся на ты, помогай с задачами, мотивируй. Не только команды — просто общайся.';
+    const messages = [
+      { role: 'system', content: systemMsg },
+      ...chatHistory.slice(-10).map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text }))
+    ];
+    const r = await fetch(AI_API_URL, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: AI_MODEL, messages, max_tokens: 500, temperature: 0.7 })
+    });
+    const data = await r.json();
+    const reply = data.choices?.[0]?.message?.content || 'Ошибка AI';
+    parseAIActions(reply);
+    const cleanReply = reply.replace(/\[(?:ADD_TASK|DEL_TASK|DONE_TASK):.*?\]/g, '').trim();
+    if (cleanReply) {
+      addChatMessage('bot', cleanReply);
+      speak(cleanReply);
+    }
+  } catch(e) {
+    addChatMessage('bot', '⚠️ Ошибка связи. Попробуй ещё раз.');
+  }
+}
 function toggleAIPanel() {
   const panel = document.getElementById('aiPanel');
   if (panel.style.display === 'none' || !panel.style.display) {
