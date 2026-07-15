@@ -73,6 +73,38 @@ def init_db():
         sent INTEGER DEFAULT 0,
         FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
     )''')
+    conn.execute('''CREATE TABLE IF NOT EXISTS conversations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        role TEXT NOT NULL,
+        message TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )''')
+    conn.commit()
+    conn.close()
+
+
+# === История переписки ===
+
+def save_message(user_id, role, message):
+    conn = get_db()
+    conn.execute('INSERT INTO conversations (user_id, role, message) VALUES (?, ?, ?)',
+                 (user_id, role, message))
+    conn.commit()
+    conn.close()
+
+def get_conversation_history(user_id, limit=20):
+    conn = get_db()
+    rows = conn.execute(
+        'SELECT role, message FROM conversations WHERE user_id = ? ORDER BY id DESC LIMIT ?',
+        (user_id, limit)
+    ).fetchall()
+    conn.close()
+    return [{'role': r['role'], 'content': r['message']} for r in reversed(rows)]
+
+def clear_conversation(user_id):
+    conn = get_db()
+    conn.execute('DELETE FROM conversations WHERE user_id = ?', (user_id,))
     conn.commit()
     conn.close()
 
@@ -348,8 +380,12 @@ def ask_ai(text, user_id):
     if not GITHUB_KEY:
         return None
     try:
+        # Сохраняем сообщение пользователя
+        save_message(user_id, 'user', text)
+
         context = get_tasks_context(user_id)
         stats = get_stats(user_id)
+        history = get_conversation_history(user_id, limit=20)
 
         system = SYSTEM_PROMPT + f"""
 
@@ -364,6 +400,9 @@ def ask_ai(text, user_id):
 
 Сегодня: {datetime.now().strftime('%d.%m.%Y')}"""
 
+        messages = [{'role': 'system', 'content': system}]
+        messages.extend(history)
+
         r = requests.post(
             'https://models.inference.ai.azure.com/chat/completions',
             headers={
@@ -372,10 +411,7 @@ def ask_ai(text, user_id):
             },
             json={
                 'model': 'gpt-4o-mini',
-                'messages': [
-                    {'role': 'system', 'content': system},
-                    {'role': 'user', 'content': text}
-                ],
+                'messages': messages,
                 'max_tokens': 500,
                 'temperature': 0.7
             },
@@ -383,6 +419,9 @@ def ask_ai(text, user_id):
         )
         data = r.json()
         reply = data['choices'][0]['message']['content']
+
+        # Сохраняем ответ бота
+        save_message(user_id, 'assistant', reply)
 
         # Парсим команды AI
         parse_ai_actions(reply, user_id)
@@ -595,6 +634,9 @@ def handle_message(event, api):
     if not text:
         return
 
+    # Сохраняем сообщение пользователя
+    save_message(user_id, 'user', text)
+
     reply = None
 
     # Команды
@@ -611,6 +653,9 @@ def handle_message(event, api):
 
     if not reply:
         reply = 'Не понял. Напиши "помощь" для списка команд.'
+
+    # Сохраняем ответ бота
+    save_message(user_id, 'assistant', reply)
 
     api.messages.send(
         user_id=user_id,
