@@ -35,6 +35,18 @@ body {
 .greeting { font-size: 13px; color: var(--text2); }
 .greeting strong { color: var(--text); font-size: 20px; display: block; margin-top: 2px; }
 .header-actions { display: flex; gap: 8px; align-items: center; }
+.sync-status {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 11px; color: var(--text3); padding: 4px 8px;
+  background: var(--surface); border-radius: 12px; border: 1px solid var(--border);
+}
+.sync-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--text3); transition: background 0.3s;
+}
+.sync-dot.online { background: var(--green); }
+.sync-dot.syncing { background: var(--yellow); animation: pulse 1s infinite; }
+.sync-dot.error { background: var(--red); }
 .header-btn {
   width: 36px; height: 36px; border-radius: 50%; background: var(--surface);
   border: 1px solid var(--border); display: flex; align-items: center; justify-content: center;
@@ -257,6 +269,10 @@ body {
       <strong>Задачник+</strong>
     </div>
     <div class="header-actions">
+      <div class="sync-status" id="syncStatus">
+        <span class="sync-dot" id="syncDot"></span>
+        <span class="sync-text" id="syncText"> offline</span>
+      </div>
       <div class="header-btn mic" id="micBtn" onclick="toggleVoice()" title="Голосовой ввод">🎤</div>
       <div class="header-btn" onclick="syncToGitHub()" title="Синхронизировать с VK">🔄</div>
       <div class="header-btn" onclick="openSettings()" title="Настройки">⚙️</div>
@@ -1146,10 +1162,40 @@ function save() {
   }
 }
 
+// ==================== SYNC STATUS ====================
+function updateSyncStatus(status, text) {
+  const dot = document.getElementById('syncDot');
+  const syncText = document.getElementById('syncText');
+  if (!dot || !syncText) return;
+  
+  dot.className = 'sync-dot ' + status;
+  syncText.textContent = text;
+}
+
+function checkOnline() {
+  if (navigator.onLine) {
+    updateSyncStatus('online', ' online');
+  } else {
+    updateSyncStatus('error', ' offline');
+  }
+}
+
+window.addEventListener('online', () => {
+  updateSyncStatus('online', ' online');
+  toast('🌐 Интернет восстановлен');
+});
+
+window.addEventListener('offline', () => {
+  updateSyncStatus('error', ' offline');
+  toast('⚠️ Нет интернета');
+});
+
 // Синхронизация с GitHub (чтобы VK-бот знал задачи)
 async function syncToGitHub() {
   const token = settings.ai_key;
   if (!token) { toast('⚠️ Введи GitHub Token в настройках'); return; }
+  
+  updateSyncStatus('syncing', ' синхронизация...');
   
   const data = JSON.stringify(tasks, null, 2);
   const repo = 'unicompact-stack/bossyoki';
@@ -1183,14 +1229,21 @@ async function syncToGitHub() {
     });
     
     if (resp.ok) {
-      toast('✅ Задачи синхронизированы с VK');
+      const now = new Date().toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'});
+      updateSyncStatus('online', ` ${now}`);
+      toast(`✅ Синхронизировано ${now}`);
     } else {
+      updateSyncStatus('error', ' ошибка');
       toast('⚠️ Ошибка синхронизации');
     }
   } catch(e) {
+    updateSyncStatus('error', ' offline');
     toast('⚠️ Ошибка сети');
   }
 }
+
+// Проверка при загрузке
+checkOnline();
 
 // ==================== SOUND & NOTIFICATIONS ====================
 let audioCtx = null;
