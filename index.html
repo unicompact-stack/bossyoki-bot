@@ -10,8 +10,8 @@
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 :root {
-  --bg: #1a1d21; --surface: #2d2d2d; --surface-hover: #363636;
-  --border: #404040; --text: #ffffff; --text2: #a0a0a0; --text3: #707070;
+  --bg: #1e1e1e; --surface: #2d2d2d; --surface-hover: #363636;
+  --border: #404040; --text: #ffffff; --text2: #c0c0c0; --text3: #909090;
   --accent: #ff6b35; --accent-light: rgba(255,107,53,0.12); --accent-dark: #e55a25;
   --green: #10b981; --green-light: rgba(16,185,129,0.12);
   --yellow: #f59e0b; --yellow-light: rgba(245,158,11,0.12);
@@ -24,6 +24,7 @@ html { scroll-behavior: smooth; }
 body {
   font-family: var(--font); background: var(--bg); color: var(--text);
   min-height: 100dvh; padding-bottom: 80px; -webkit-font-smoothing: antialiased;
+  font-size: 16px;
 }
 
 /* ===== HEADER ===== */
@@ -48,9 +49,9 @@ body {
 .sync-dot.syncing { background: var(--yellow); animation: pulse 1s infinite; }
 .sync-dot.error { background: var(--red); }
 .header-btn {
-  width: 36px; height: 36px; border-radius: 50%; background: var(--surface);
+  width: 44px; height: 44px; border-radius: 50%; background: var(--surface);
   border: 1px solid var(--border); display: flex; align-items: center; justify-content: center;
-  cursor: pointer; font-size: 16px; transition: all 0.2s; color: var(--text);
+  cursor: pointer; font-size: 18px; transition: all 0.2s; color: var(--text);
 }
 .header-btn:hover { border-color: var(--accent); }
 .header-btn.mic { background: var(--accent); border-color: var(--accent); font-size: 18px; }
@@ -88,7 +89,7 @@ body {
 }
 .column {
   background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border);
-  display: flex; flex-direction: column; min-height: 200px;
+  display: flex; flex-direction: column; min-height: 300px; flex: 1;
 }
 .column.drag-over { border-color: var(--accent); background: var(--accent-light); }
 .column-header {
@@ -108,6 +109,7 @@ body {
 .task-card {
   background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm);
   padding: 12px; cursor: grab; transition: all 0.2s; position: relative;
+  animation: fadeInUp 0.3s ease;
 }
 .task-card:hover { border-color: var(--accent); transform: translateY(-1px); box-shadow: var(--shadow); }
 .task-card.dragging { opacity: 0.5; transform: scale(0.95); }
@@ -158,6 +160,18 @@ body {
   display: flex; align-items: center; justify-content: center;
   transition: transform 0.2s; z-index: 50;
 }
+/* ===== HISTORY ===== */
+.history-section {
+  border-top: 1px solid var(--border);
+}
+.history-item {
+  display: flex; align-items: center; gap: 8px; padding: 8px 0;
+  font-size: 13px; color: var(--text3); border-bottom: 1px solid var(--border);
+}
+.history-item:last-child { border-bottom: none; }
+.history-item .done-check { color: var(--green); }
+.history-item .done-title { text-decoration: line-through; flex: 1; }
+.history-item .done-date { font-size: 11px; }
 .fab:hover { transform: scale(1.1); }
 .fab:active { transform: scale(0.95); }
 
@@ -167,6 +181,34 @@ body {
   background: var(--surface); border-top: 1px solid var(--border);
   padding: 10px 16px; display: flex; align-items: center; gap: 10px; z-index: 100;
 }
+.voice-bar.listening {
+  border-top-color: var(--accent);
+  box-shadow: 0 -2px 12px rgba(255,107,53,0.3);
+}
+/* ===== VOICE SUBTITLE ===== */
+.voice-subtitle {
+  position: fixed; bottom: 70px; left: 50%; transform: translateX(-50%);
+  background: rgba(0,0,0,0.8); color: #fff; padding: 8px 16px;
+  border-radius: 12px; font-size: 13px; max-width: 80%; text-align: center;
+  z-index: 101; opacity: 0; transition: opacity 0.3s; pointer-events: none;
+}
+.voice-subtitle.show { opacity: 1; }
+/* ===== VOICE WAVES ===== */
+@keyframes voiceWave {
+  0%,100% { height: 4px; }
+  50% { height: 20px; }
+}
+.voice-waves {
+  display: flex; gap: 3px; align-items: center; height: 24px;
+}
+.voice-wave-bar {
+  width: 3px; background: var(--accent); border-radius: 2px;
+  animation: voiceWave 0.6s ease-in-out infinite;
+}
+.voice-wave-bar:nth-child(2) { animation-delay: 0.1s; }
+.voice-wave-bar:nth-child(3) { animation-delay: 0.2s; }
+.voice-wave-bar:nth-child(4) { animation-delay: 0.3s; }
+.voice-wave-bar:nth-child(5) { animation-delay: 0.4s; }
 .voice-input {
   flex: 1; padding: 10px 14px; background: var(--bg); border: 1px solid var(--border);
   border-radius: 24px; font-size: 14px; font-family: var(--font); color: var(--text);
@@ -253,6 +295,8 @@ body {
 @media (max-width: 768px) {
   .board { grid-template-columns: 1fr; gap: 16px; }
   .column { min-height: 150px; }
+  .header-btn { width: 40px; height: 40px; font-size: 16px; }
+  .greeting strong { font-size: 18px; }
 }
 @media (min-width: 769px) and (max-width: 1024px) {
   .board { grid-template-columns: 1fr 1fr; }
@@ -273,7 +317,7 @@ body {
         <span class="sync-dot" id="syncDot"></span>
         <span class="sync-text" id="syncText"> offline</span>
       </div>
-      <div class="header-btn mic" id="micBtn" onclick="toggleVoice()" title="Голосовой ввод">🎤</div>
+      <div class="header-btn" id="micBtn" onclick="toggleVoice()" title="Голосовой ввод" style="display:none">🎤</div>
       <div class="header-btn" onclick="syncToGitHub()" title="Синхронизировать с VK">🔄</div>
       <div class="header-btn" onclick="openSettings()" title="Настройки">⚙️</div>
     </div>
@@ -328,18 +372,30 @@ body {
 <!-- ===== FAB ===== -->
 <button class="fab" onclick="openModal()">+</button>
 
+<!-- ===== HISTORY ===== -->
+<div class="history-section" id="historySection" style="display:none;padding:16px">
+  <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--text2)">📋 Выполненные задачи</h3>
+  <div id="historyList"></div>
+</div>
+
 <!-- ===== VOICE BAR ===== -->
 <div class="voice-bar">
   <input class="voice-input" id="voiceInput" placeholder="Нажми 🎤 или напиши..." onkeydown="if(event.key==='Enter')sendText()">
   <button class="voice-btn" id="voiceBtn" onclick="toggleVoice()">🎤</button>
 </div>
 
-<!-- ===== AI PANEL ===== -->
-<div class="ai-panel">
+<!-- ===== VOICE SUBTITLE ===== -->
+<div class="voice-subtitle" id="voiceSubtitle"></div>
+
+<!-- ===== AI PANEL (скрыта, вызывается через настройки) ===== -->
+<div class="ai-panel" id="aiPanel" style="display:none">
   <button class="ai-btn" onclick="analyzeDay()">📊 Анализ дня</button>
   <button class="ai-btn" onclick="planDay()">🤖 План на день</button>
   <button class="ai-btn" onclick="syncToGitHub()">🔄 Синхронизация</button>
 </div>
+
+<!-- ===== AI BUTTON (в хедере) ===== -->
+<div class="header-btn" onclick="toggleAIPanel()" title="AI-функции" style="margin-left:8px;background:var(--accent);border-color:var(--accent)">🤖</div>
 
 <!-- ===== MODAL: TASK ===== -->
 <div class="modal-overlay" id="modalOverlay" onclick="if(event.target===this)closeModal()">
@@ -455,6 +511,7 @@ let editingId = null;
 let dragId = null;
 let recognition = null;
 let synth = window.speechSynthesis;
+let syncTimer = null;
 
 const CAT_LABELS = { work:'💼 Работа', home:'🏠 Личное', study:'📚 Учёба', health:'💪 Здоровье', project:'🎯 Проект', shop:'🛒 Покупки' };
 const PRI_LABELS = { high:'🔴 Срочно', medium:'🟡 Важно', low:'🟢 Потом' };
@@ -483,43 +540,62 @@ function getColumn(t) {
 // ==================== GITHUB SYNC ====================
 async function loadFromGitHub() {
   const token = settings.ai_key;
-  if (!token) return;
-  
+  if (!token) {
+    updateSyncStatus('error', ' нет токена');
+    return;
+  }
+
+  updateSyncStatus('syncing', ' загрузка...');
+
   try {
     const resp = await fetch('https://api.github.com/repos/unicompact-stack/bossyoki/contents/tasks.json', {
       headers: { 'Authorization': 'token ' + token }
     });
-    
+
     if (resp.ok) {
       const file = await resp.json();
       const content = decodeURIComponent(escape(atob(file.content)));
-      const githubTasks = JSON.parse(content);
-      
+      const githubData = JSON.parse(content);
+
+      // Поддержка нового формата (с version) и старого (массив)
+      const githubTasks = Array.isArray(githubData) ? githubData : (githubData.tasks || []);
+
       // Объединяем: GitHub задачи + локальные (локальные приоритетнее)
       const localIds = new Set(tasks.map(t => t.id));
       const newTasks = githubTasks.filter(t => !localIds.has(t.id));
-      
+
       if (newTasks.length) {
         tasks = [...tasks, ...newTasks];
-        save();
+        localStorage.setItem('zadachnik_tasks', JSON.stringify(tasks));
         renderAll();
         toast(`📥 Загружено ${newTasks.length} задач с GitHub`);
       }
+
+      updateSyncStatus('online', ' синхронизировано');
+    } else if (resp.status === 404) {
+      // Файла нет — создаём
+      updateSyncStatus('online', ' файл не найден');
     }
   } catch(e) {
     console.log('GitHub load error:', e);
+    updateSyncStatus('error', ' ошибка загрузки');
   }
 }
 
 // ==================== GREETING ====================
 function updateGreeting() {
-  const h = new Date().getHours();
+  const now = new Date();
+  const h = now.getHours();
+  const m = now.getMinutes().toString().padStart(2, '0');
   let g = 'Доброе утро';
   if (h >= 12 && h < 17) g = 'Добрый день';
   else if (h >= 17 && h < 22) g = 'Добрый вечер';
   else if (h >= 22 || h < 5) g = 'Доброй ночи';
-  document.getElementById('greetingText').textContent = g;
+  document.getElementById('greetingText').textContent = `${g} • ${h}:${m}`;
 }
+
+// Обновляем время каждую минуту
+setInterval(updateGreeting, 60000);
 
 // ==================== RENDER ====================
 function renderAll() {
@@ -547,7 +623,32 @@ function renderAll() {
   });
 
   updateStats();
+  updateHistory();
   save();
+}
+
+function updateHistory() {
+  const doneTasks = tasks.filter(t => t.done).sort((a,b) => {
+    if (!a.created || !b.created) return 0;
+    return new Date(b.created) - new Date(a.created);
+  }).slice(0, 10); // Последние 10
+
+  const historySection = document.getElementById('historySection');
+  const historyList = document.getElementById('historyList');
+
+  if (doneTasks.length) {
+    historySection.style.display = 'block';
+    historyList.innerHTML = doneTasks.map(t => {
+      const dateStr = t.created ? new Date(t.created).toLocaleDateString('ru-RU', {day:'numeric',month:'short'}) : '';
+      return `<div class="history-item">
+        <span class="done-check">✓</span>
+        <span class="done-title">${esc(t.title)}</span>
+        <span class="done-date">${dateStr}</span>
+      </div>`;
+    }).join('');
+  } else {
+    historySection.style.display = 'none';
+  }
 }
 
 function taskCard(t) {
@@ -593,13 +694,16 @@ function onDragStart(e, id) {
   dragId = id;
   e.target.classList.add('dragging');
   e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', id);
 }
 function onDragEnd(e) {
   e.target.classList.remove('dragging');
   document.querySelectorAll('.column').forEach(c => c.classList.remove('drag-over'));
+  dragId = null;
 }
 function onDragOver(e) {
   e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
   e.currentTarget.classList.add('drag-over');
 }
 function onDragLeave(e) {
@@ -608,8 +712,9 @@ function onDragLeave(e) {
 function onDrop(e, col) {
   e.preventDefault();
   e.currentTarget.classList.remove('drag-over');
-  if (!dragId) return;
-  const t = tasks.find(x => x.id === dragId);
+  const id = e.dataTransfer.getData('text/plain') || dragId;
+  if (!id) return;
+  const t = tasks.find(x => x.id === id);
   if (!t) return;
 
   const todayDate = today();
@@ -728,21 +833,21 @@ function saveTask() {
 
 // ==================== STATS ====================
 function updateStats() {
-  const todayTasks = tasks.filter(t => !t.done && t.date === today());
-  const doneToday = tasks.filter(t => t.done && t.date === today()).length;
-  const total = todayTasks.length + doneToday;
-  
-  document.getElementById('statDone').textContent = doneToday;
+  const activeTasks = tasks.filter(t => !t.done);
+  const doneTasks = tasks.filter(t => t.done).length;
+  const total = activeTasks.length + doneTasks;
+
+  document.getElementById('statDone').textContent = doneTasks;
   document.getElementById('statTotal').textContent = total;
-  
-  const progress = total > 0 ? (doneToday / total * 100) : 0;
+
+  const progress = total > 0 ? (doneTasks / total * 100) : 0;
   document.getElementById('progressFill').style.width = progress + '%';
-  
+
   const motivation = document.getElementById('motivation');
-  if (doneToday >= 5) {
+  if (doneTasks >= 5) {
     motivation.textContent = MOTIVATION[Math.floor(Math.random() * MOTIVATION.length)];
     motivation.classList.add('show');
-    if (doneToday === 5) {
+    if (doneTasks === 5) {
       playSound('done');
       showNotification('BossYoki', 'Ты сегодня супергерой! 5 задач выполнено!');
       speak('Пять задач выполнено! Ты супергерой!');
@@ -801,14 +906,28 @@ function startListening() {
   recognition.start();
   document.getElementById('micBtn').classList.add('listening');
   document.getElementById('voiceBtn').classList.add('listening');
+  document.querySelector('.voice-bar').classList.add('listening');
+  showVoiceSubtitle('Слушаю...');
 }
 function stopListening() {
   document.getElementById('micBtn').classList.remove('listening');
   document.getElementById('voiceBtn').classList.remove('listening');
+  document.querySelector('.voice-bar').classList.remove('listening');
+  hideVoiceSubtitle();
+}
+
+function showVoiceSubtitle(text) {
+  const el = document.getElementById('voiceSubtitle');
+  el.textContent = text;
+  el.classList.add('show');
+}
+function hideVoiceSubtitle() {
+  document.getElementById('voiceSubtitle').classList.remove('show');
 }
 
 function processVoiceCommand(text) {
   const lower = text.toLowerCase();
+  showVoiceSubtitle(text);
 
   // Команды для просмотра
   if (lower.includes('что у меня') || lower.includes('покажи задачи') || lower.includes('список')) {
@@ -818,6 +937,59 @@ function processVoiceCommand(text) {
       speak(`У тебя ${todayTasks.length} задач на сегодня: ${list}`);
     } else {
       speak('На сегодня задач нет. Молодец!');
+    }
+    return;
+  }
+
+  // Покажи срочные
+  if (lower.includes('покажи срочн') || lower.includes('что горит')) {
+    const urgentTasks = tasks.filter(t => !t.done && t.priority === 'high');
+    if (urgentTasks.length) {
+      const list = urgentTasks.map((t,i) => `${i+1}. ${t.title}`).join(', ');
+      speak(`Срочных задач: ${urgentTasks.length}. ${list}`);
+    } else {
+      speak('Срочных задач нет. Отдыхай!');
+    }
+    return;
+  }
+
+  // Что завтра
+  if (lower.includes('что завтра') || lower.includes('завтра что')) {
+    const tomorrow = new Date(today() + 'T00:00:00');
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = fmtDate(tomorrow);
+    const tomorrowTasks = tasks.filter(t => !t.done && t.date === tomorrowStr);
+    if (tomorrowTasks.length) {
+      const list = tomorrowTasks.map((t,i) => `${i+1}. ${t.title}`).join(', ');
+      speak(`На завтра ${tomorrowTasks.length} задач: ${list}`);
+    } else {
+      speak('На завтра задач нет. Свободен!');
+    }
+    return;
+  }
+
+  // Мотивация
+  if (lower.includes('мотивац') || lower.includes('воодушеви')) {
+    speak(MOTIVATION[Math.floor(Math.random() * MOTIVATION.length)]);
+    return;
+  }
+
+  // План на день
+  if (lower.includes('план на день') || lower.includes('что делать')) {
+    planDay();
+    return;
+  }
+
+  // Удалить задачу
+  if (lower.includes('удалить задачу') || lower.includes('убери задачу')) {
+    const titleToDelete = text.replace(/удалить задачу|убери задачу/gi, '').trim();
+    const taskToDelete = tasks.find(t => t.title.toLowerCase().includes(titleToDelete.toLowerCase()));
+    if (taskToDelete) {
+      tasks = tasks.filter(t => t.id !== taskToDelete.id);
+      renderAll();
+      speak(`Задача "${taskToDelete.title}" удалена`);
+    } else {
+      speak('Не нашёл такую задачу. Повтори название.');
     }
     return;
   }
@@ -913,6 +1085,7 @@ function processVoiceCommand(text) {
   }
 
   // Не распознано как команда → отправляем в AI
+  // Если AI тоже не поможет — скажем "Повтори"
   askAI(text);
 }
 
@@ -1131,6 +1304,16 @@ ${taskList}
   }
 }
 
+// ==================== AI PANEL TOGGLE ====================
+function toggleAIPanel() {
+  const panel = document.getElementById('aiPanel');
+  if (panel.style.display === 'none' || !panel.style.display) {
+    panel.style.display = 'flex';
+  } else {
+    panel.style.display = 'none';
+  }
+}
+
 // ==================== SETTINGS ====================
 function openSettings() {
   document.getElementById('settingsToken').value = settings.ai_key || '';
@@ -1153,12 +1336,13 @@ function saveSettings() {
 // ==================== UTILS ====================
 function save() {
   localStorage.setItem('zadachnik_tasks', JSON.stringify(tasks));
-  // Автосинхронизация с GitHub через 2 секунды
-  if (settings.ai_key && !window._syncTimer) {
-    window._syncTimer = setTimeout(() => {
+  // Автосинхронизация с GitHub через 3 секунды
+  if (settings.ai_key) {
+    if (syncTimer) clearTimeout(syncTimer);
+    syncTimer = setTimeout(() => {
       syncToGitHub();
-      window._syncTimer = null;
-    }, 2000);
+      syncTimer = null;
+    }, 3000);
   }
 }
 
@@ -1167,7 +1351,7 @@ function updateSyncStatus(status, text) {
   const dot = document.getElementById('syncDot');
   const syncText = document.getElementById('syncText');
   if (!dot || !syncText) return;
-  
+
   dot.className = 'sync-dot ' + status;
   syncText.textContent = text;
 }
@@ -1179,6 +1363,39 @@ function checkOnline() {
     updateSyncStatus('error', ' offline');
   }
 }
+
+// Проверка напоминаний каждую минуту
+function checkReminders() {
+  const now = new Date();
+  const currentHour = now.getHours();
+  const currentMinute = now.getMinutes();
+  const todayDate = today();
+
+  tasks.forEach(t => {
+    if (t.done || !t.date || t.date !== todayDate || !t.time) return;
+    const [h, m] = t.time.split(':').map(Number);
+    if (h === currentHour && m === currentMinute) {
+      playSound('reminder');
+      showNotification('BossYoki', `Напоминание: ${t.title}`);
+      speak(`Босс, напоминаю: ${t.title}`);
+      // Дублирование в VK
+      sendVKReminder(t.title);
+    }
+  });
+}
+
+// Отправка напоминания в VK
+function sendVKReminder(taskTitle) {
+  const vkToken = 'vk1.a.7O7vc4ePWw_iA6BM-Fs4qBSPIjQGTSc32lbfobMrmyzZQIK2LtV0lOYQlNRXLLRAijN_hbKnvGIBFlCeRKYxIscvDUn_JiSfVYZH3MC3D1fuWotDXSvKT0da3aMQQQsJu-_3ZKJnNUK9Epk4V4KP2Evq8sESlzvdd3kHf3rDsz2Mko-So1IaXGudoBYrGoH6QYoxUr-g8n-mgwuMBN92zQ';
+  const userId = 114439622;
+  const randomId = Math.floor(Math.random() * 1000000000);
+  const message = encodeURIComponent(`BossYoki напоминание: ${taskTitle}`);
+
+  fetch(`https://api.vk.com/method/messages.send?access_token=${vkToken}&user_id=${userId}&message=${message}&random_id=${randomId}&v=5.199`)
+    .catch(e => console.log('VK reminder error:', e));
+}
+
+setInterval(checkReminders, 60000);
 
 window.addEventListener('online', () => {
   updateSyncStatus('online', ' online');
@@ -1194,13 +1411,19 @@ window.addEventListener('offline', () => {
 async function syncToGitHub() {
   const token = settings.ai_key;
   if (!token) { toast('⚠️ Введи GitHub Token в настройках'); return; }
-  
+
   updateSyncStatus('syncing', ' синхронизация...');
-  
-  const data = JSON.stringify(tasks, null, 2);
+
+  // Формат с version и updatedAt
+  const data = JSON.stringify({
+    version: '1.0',
+    updatedAt: new Date().toISOString(),
+    tasks: tasks
+  }, null, 2);
+
   const repo = 'unicompact-stack/bossyoki';
   const path = 'tasks.json';
-  
+
   try {
     let sha = '';
     try {
@@ -1212,13 +1435,13 @@ async function syncToGitHub() {
         sha = fileInfo.sha;
       }
     } catch(e) {}
-    
+
     const body = {
       message: 'Обновление задач из веб-приложения',
       content: btoa(unescape(encodeURIComponent(data))),
       sha: sha
     };
-    
+
     const resp = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
       method: 'PUT',
       headers: {
@@ -1227,7 +1450,7 @@ async function syncToGitHub() {
       },
       body: JSON.stringify(body)
     });
-    
+
     if (resp.ok) {
       const now = new Date().toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'});
       updateSyncStatus('online', ` ${now}`);
