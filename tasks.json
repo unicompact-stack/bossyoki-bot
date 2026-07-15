@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "updatedAt": "2026-07-15T11:37:21.477Z",
+  "updatedAt": "2026-07-15T11:38:04.849Z",
   "tasks": [
     {
       "id": "mrl745j7bx4b",
@@ -101,6 +101,19 @@
       "subtaskDone": [],
       "done": false,
       "created": "2026-07-15T11:37:06.066Z"
+    },
+    {
+      "id": "mrm0ak8hz4lz",
+      "title": "ут напомни о всех напоминаниях",
+      "note": "",
+      "date": "2026-07-15",
+      "time": "14:43",
+      "priority": "medium",
+      "category": "",
+      "subtasks": [],
+      "subtaskDone": [],
+      "done": false,
+      "created": "2026-07-15T11:38:01.841Z"
     }
   ]
 }
