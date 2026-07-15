@@ -622,6 +622,30 @@ def handle_message(event, api):
 
 # === Запуск ===
 
+# === Health check для Render.com ===
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import os
+
+PORT = int(os.getenv('PORT', '10000'))
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(b'OK')
+    def log_message(self, format, *args):
+        pass
+
+def start_health_server():
+    try:
+        server = HTTPServer(('0.0.0.0', PORT), HealthHandler)
+        print(f'Health server started on port {PORT}', flush=True)
+        server.serve_forever()
+    except Exception as e:
+        print(f'Health server error: {e}', flush=True)
+
+
 def main():
     global vk_session_ref
 
@@ -647,6 +671,11 @@ def main():
     longpoll = VkBotLongPoll(vk_session, GROUP_ID)
 
     log.info(f'🚀 Бот запущен! Группа: {GROUP_ID}')
+
+    # Health check для Render — ЗАПУСКАЕМ ПЕРВЫМ
+    health_thread = threading.Thread(target=start_health_server, daemon=True)
+    health_thread.start()
+    log.info(f'✅ Health check на порту {PORT}')
 
     # Фоновые потоки
     threading.Thread(target=check_reminders, daemon=True).start()
