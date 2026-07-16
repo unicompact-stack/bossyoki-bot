@@ -1,29 +1,6 @@
 {
   "version": "2.0",
   "source": "vk_bot",
-  "updatedAt": "2026-07-16T20:58:34.775132",
-  "tasks": [
-    {
-      "id": "1",
-      "title": "позвонить жене",
-      "note": "",
-      "date": "2026-07-16",
-      "time": "19:39",
-      "priority": "medium",
-      "category": "",
-      "done": false,
-      "created": "2026-07-16 19:34:05"
-    },
-    {
-      "id": "2",
-      "title": "Сходить в магазин",
-      "note": "",
-      "date": "2026-07-17",
-      "time": "",
-      "priority": "medium",
-      "category": "",
-      "done": true,
-      "created": "2026-07-16 19:35:02"
-    }
-  ]
+  "updatedAt": "2026-07-16T21:00:37.552643",
+  "tasks": []
 }
