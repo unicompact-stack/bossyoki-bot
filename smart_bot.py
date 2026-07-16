@@ -212,7 +212,7 @@ def sync_to_github(force=False):
                 'title': r['title'],
                 'note': r['note'] or '',
                 'date': r['deadline'] or '',
-                'time': '',
+                'time': r['time'] or '',
                 'priority': r['priority'],
                 'category': r['category'] or '',
                 'done': r['status'] == 'done',
@@ -284,8 +284,8 @@ def load_from_github():
                     continue
                 if t['title'].lower() not in existing:
                     conn.execute(
-                        'INSERT INTO tasks (user_id, title, note, deadline, priority, category) VALUES (?, ?, ?, ?, ?, ?)',
-                        (VK_USER_ID, t['title'], t.get('note', ''), t.get('date', ''), t.get('priority', 'medium'), t.get('category', ''))
+                        'INSERT INTO tasks (user_id, title, note, deadline, priority, category, time) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                        (VK_USER_ID, t['title'], t.get('note', ''), t.get('date', ''), t.get('priority', 'medium'), t.get('category', ''), t.get('time', ''))
                     )
                     added += 1
             conn.commit()
@@ -929,6 +929,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 <span style="color:#888;font-size:13px">Dashboard</span>
 </div>
 <div class="container">
+<div style="background:#16213e;border-radius:8px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:8px;font-size:12px;color:#888"><div style="width:8px;height:8px;border-radius:50%;background:#4caf50"></div><span id="sync-text">Данные: SQLite (Render) + GitHub tasks.json</span></div>
 <div class="stats" id="stats"></div>
 <div class="section">
 <h2>Последние сообщения</h2>
