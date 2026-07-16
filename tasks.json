@@ -1,7 +1,7 @@
 {
   "version": "2.0",
   "source": "vk_bot",
-  "updatedAt": "2026-07-16T09:45:21.836160",
+  "updatedAt": "2026-07-16T09:50:22.991370",
   "tasks": [
     {
       "id": "1",
@@ -13,6 +13,17 @@
       "category": "",
       "done": false,
       "created": "2026-07-16 08:18:24"
+    },
+    {
+      "id": "2",
+      "title": "съездить на участок через 10 минут",
+      "note": "",
+      "date": "",
+      "time": "",
+      "priority": "medium",
+      "category": "",
+      "done": false,
+      "created": "2026-07-16 09:46:06"
     }
   ]
 }
