@@ -740,66 +740,103 @@ def periodic_sync():
         time.sleep(300)
 
 
-# === Автоотчёт каждые 10 минут ===
+# === Автоотчёт утром и вечером ===
 
-_report_counter = 0
+_report_sent_today = {}
 
 def check_daily_report():
-    """Отправляет сводку каждые 10 минут"""
-    global _report_counter
-    # Ждём 30 секунд после старта чтобы VK сессия была готова
-    time.sleep(30)
+    """Отправляет отчёт утром (9:00) и вечером (21:00)"""
     while True:
         try:
-            _report_counter += 1
-            send_periodic_summary(VK_USER_ID, _report_counter)
+            now = datetime.now()
+            today = now.strftime('%Y-%m-%d')
+            hour = now.hour
+            minute = now.minute
+
+            # Утренний отчёт в 9:00 (окно 9:00-9:02)
+            morning_key = f'{today}_morning'
+            if hour == 9 and minute < 3 and morning_key not in _report_sent_today:
+                _report_sent_today[morning_key] = True
+                send_morning_report(VK_USER_ID)
+
+            # Вечерний отчёт в 21:00 (окно 21:00-21:02)
+            evening_key = f'{today}_evening'
+            if hour == 21 and minute < 3 and evening_key not in _report_sent_today:
+                _report_sent_today[evening_key] = True
+                send_evening_report(VK_USER_ID)
+
         except Exception as e:
-            log.error(f'Periodic report error: {e}')
-        time.sleep(600)  # 10 минут
+            log.error(f'Daily report error: {e}')
+        time.sleep(60)
 
 
-def send_periodic_summary(user_id, count):
-    """Отправляет краткую сводку"""
+def send_morning_report(user_id):
+    """Утренний отчёт: что сегодня делаем"""
     stats = get_stats(user_id)
     tasks = get_tasks(user_id)
     today_str = datetime.now().strftime('%Y-%m-%d')
     today_tasks = [t for t in tasks if t.get('deadline') == today_str]
     overdue = [t for t in tasks if t.get('deadline') and t['deadline'] < today_str]
 
-    # Определяем время суток для приветствия
-    hour = datetime.now().hour
-    if 6 <= hour < 12:
-        greeting = '☀️'
-    elif 12 <= hour < 18:
-        greeting = '🌤'
-    else:
-        greeting = '🌙'
-
-    lines = [f'{greeting} Сводка #{count}:']
+    lines = ['☀️ Доброе утро! План на сегодня:']
 
     if today_tasks:
-        done_today = [t for t in today_tasks if t['status'] == 'done']
-        pending_today = [t for t in today_tasks if t['status'] == 'active']
-        lines.append(f'📋 Сегодня: {len(done_today)}✅ / {len(pending_today)}⏳')
-        for t in pending_today[:5]:
+        lines.append(f'📋 Дел: {len(today_tasks)}')
+        for t in today_tasks:
             time_str = f" в {t['time']}" if t.get('time') else ''
             lines.append(f'  • {t["title"]}{time_str}')
-        if len(pending_today) > 5:
-            lines.append(f'  ... и ещё {len(pending_today) - 5}')
     else:
-        lines.append('📋 На сегодня задач нет')
+        lines.append('📋 Задач нет — добавь что-нибудь!')
 
     if overdue:
-        lines.append(f'⚠️ Просрочено: {len(overdue)}')
+        lines.append(f'\n⚠️ Просрочено: {len(overdue)}')
+        for t in overdue[:3]:
+            lines.append(f'  • {t["title"]} ({t["deadline"]})')
+
+    lines.append(f'\n📊 Всего: {stats["done"]}✅ / {stats["active"]}⏳')
+    lines.append('\n💪 Давай, ты сможешь!')
+
+    msg = '\n'.join(lines)
+    send_vk_message(user_id, msg)
+    log.info('☀️ Утренний отчёт отправлен')
+
+
+def send_evening_report(user_id):
+    """Вечерний отчёт: итоги дня"""
+    stats = get_stats(user_id)
+    today_str = datetime.now().strftime('%Y-%m-%d')
+    tasks = get_tasks(user_id)
+    today_tasks = [t for t in tasks if t.get('deadline') == today_str]
+    done_today = [t for t in today_tasks if t['status'] == 'done']
+    pending_today = [t for t in today_tasks if t['status'] == 'active']
+
+    lines = ['🌙 Итоги дня:']
+
+    if done_today:
+        lines.append(f'✅ Выполнено: {len(done_today)}')
+        for t in done_today:
+            lines.append(f'  • {t["title"]}')
+    else:
+        lines.append('✅ Сегодня ничего не выполнено')
+
+    if pending_today:
+        lines.append(f'\n⏳ Осталось: {len(pending_today)}')
+        for t in pending_today[:3]:
+            time_str = f" в {t['time']}" if t.get('time') else ''
+            lines.append(f'  • {t["title"]}{time_str}')
 
     lines.append(f'\n📊 Всего: {stats["done"]}✅ / {stats["active"]}⏳')
 
+    if len(done_today) >= 3:
+        lines.append('\n🔥 Ты молодец, отличный день!')
+    elif len(done_today) > 0:
+        lines.append('\n👍 Неплохо, завтра ещё больше!')
+    else:
+        lines.append('\n💪 Завтра обязательно получится!')
+
     msg = '\n'.join(lines)
-    try:
-        send_vk_message(user_id, msg)
-        log.info(f'📊 Автоотчёт #{count} отправлен')
-    except Exception as e:
-        log.error(f'Periodic summary send error: {e}')
+    send_vk_message(user_id, msg)
+    log.info('🌙 Вечерний отчёт отправлен')
 
 
 # === Обработка сообщений ===
