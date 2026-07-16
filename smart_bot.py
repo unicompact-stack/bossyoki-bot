@@ -702,7 +702,8 @@ def send_vk_message(user_id, text):
         if not vk_session_ref:
             log.error('❌ VK сессия не инициализирована')
             return False
-        vk_session_ref.messages.send(
+        api = vk_session_ref.get_api()
+        api.messages.send(
             user_id=user_id,
             message=text,
             random_id=get_random_id()
