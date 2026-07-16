@@ -130,7 +130,6 @@ def add_task(user_id, title, deadline=None, priority='medium', category='', note
     task_id = cur.lastrowid
     conn.commit()
     conn.close()
-    # Синхронизируем с GitHub
     sync_to_github()
     return task_id
 
@@ -188,10 +187,10 @@ def get_stats(user_id):
 # === GitHub Sync ===
 
 _last_sync_time = 0
-_SYNC_INTERVAL = 30  # 30 секунд минимум между синхронизациями
+_SYNC_INTERVAL = 30  # 30 секунд минимум
 
 def sync_to_github(force=False):
-    """Отправляет задачи в GitHub tasks.json"""
+    """Бот пишет в GitHub tasks.json — главный источник"""
     global _last_sync_time
     now = time.time()
     if not force and (now - _last_sync_time) < _SYNC_INTERVAL:
@@ -199,7 +198,7 @@ def sync_to_github(force=False):
     _last_sync_time = now
 
     if not GITHUB_KEY or not GITHUB_KEY.startswith('ghp_'):
-        log.warning('⚠️ GitHub токен не настроен, синхронизация невозможна')
+        log.warning('⚠️ GitHub токен не настроен')
         return
     try:
         conn = get_db()
