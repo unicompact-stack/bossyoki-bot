@@ -697,24 +697,34 @@ def handle_help():
 vk_session_ref = None
 
 def send_vk_message(user_id, text):
+    """Отправляет сообщение через VK API"""
     try:
-        if vk_session_ref:
-            vk_session_ref.messages.send(
-                user_id=user_id,
-                message=text,
-                random_id=get_random_id()
-            )
+        if not vk_session_ref:
+            log.error('❌ VK сессия не инициализирована')
+            return False
+        vk_session_ref.messages.send(
+            user_id=user_id,
+            message=text,
+            random_id=get_random_id()
+        )
+        log.info(f'📤 VK сообщение отправлено: {text[:50]}...')
+        return True
     except Exception as e:
-        log.error(f'VK send error: {e}')
+        log.error(f'❌ VK send error: {e}')
+        return False
 
 def check_reminders():
+    """Проверяет напоминания каждую минуту"""
     while True:
         try:
             pending = get_pending_reminders()
+            if pending:
+                log.info(f'📋 Найдено {len(pending)} напоминаний')
             for r in pending:
+                log.info(f'⏰ Отправляю напоминание: {r["title"]} для {r["user_id"]}')
                 send_vk_message(r['user_id'], f'⏰ Напоминание: {r["title"]}')
                 mark_reminder_sent(r['id'])
-                log.info(f'Напоминание: {r["user_id"]}: {r["title"]}')
+                log.info(f'✅ Напоминание отправлено: {r["title"]}')
         except Exception as e:
             log.error(f'Reminder check error: {e}')
         time.sleep(60)
@@ -736,13 +746,15 @@ _report_counter = 0
 def check_daily_report():
     """Отправляет сводку каждые 10 минут"""
     global _report_counter
+    # Ждём 30 секунд после старта чтобы VK сессия была готова
+    time.sleep(30)
     while True:
         try:
-            time.sleep(600)  # 10 минут
             _report_counter += 1
             send_periodic_summary(VK_USER_ID, _report_counter)
         except Exception as e:
             log.error(f'Periodic report error: {e}')
+        time.sleep(600)  # 10 минут
 
 
 def send_periodic_summary(user_id, count):
@@ -1053,6 +1065,13 @@ def main():
     longpoll = VkBotLongPoll(vk_session, GROUP_ID)
 
     log.info(f'🚀 Бот запущен! Группа: {GROUP_ID}')
+
+    # Тестовое сообщение при старте — проверяем что VK работает
+    try:
+        send_vk_message(VK_USER_ID, '🟢 Бот запущен и готов к работе!')
+        log.info('✅ Тестовое сообщение отправлено')
+    except Exception as e:
+        log.error(f'❌ Тестовое сообщение не отправлено: {e}')
 
     # Health check для Render — ЗАПУСКАЕМ ПЕРВЫМ
     health_thread = threading.Thread(target=start_health_server, daemon=True)
