@@ -1,18 +1,6 @@
 {
   "version": "2.0",
   "source": "vk_bot",
-  "updatedAt": "2026-07-15T20:56:05.981972",
-  "tasks": [
-    {
-      "id": "1",
-      "title": "Поездка на участок",
-      "note": "",
-      "date": "2026-07-16",
-      "time": "",
-      "priority": "high",
-      "category": "",
-      "done": false,
-      "created": "2026-07-15 20:41:43"
-    }
-  ]
+  "updatedAt": "2026-07-16T06:20:52.642452",
+  "tasks": []
 }
