@@ -414,9 +414,6 @@ def ask_ai(text, user_id):
     if not GITHUB_KEY:
         return None
     try:
-        # Сохраняем сообщение пользователя
-        save_message(user_id, 'user', text)
-
         context = get_tasks_context(user_id)
         stats = get_stats(user_id)
         history = get_conversation_history(user_id, limit=20)
@@ -453,9 +450,6 @@ def ask_ai(text, user_id):
         )
         data = r.json()
         reply = data['choices'][0]['message']['content']
-
-        # Сохраняем ответ бота
-        save_message(user_id, 'assistant', reply)
 
         # Парсим команды AI
         parse_ai_actions(reply, user_id)
@@ -723,28 +717,152 @@ def handle_message(event, api):
 
 # === Запуск ===
 
-# === Health check для Render.com ===
+# === Health check + Dashboard для Render.com ===
 from http.server import HTTPServer, BaseHTTPRequestHandler
-import os
+from urllib.parse import urlparse
 
 PORT = int(os.getenv('PORT', '10000'))
 
-class HealthHandler(BaseHTTPRequestHandler):
+DASHBOARD_HTML = '''<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BossYoki Bot — Dashboard</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f0f0f;color:#e0e0e0;min-height:100vh}
+.header{background:#1a1a2e;padding:16px 24px;display:flex;align-items:center;gap:12px;border-bottom:1px solid #333}
+.header h1{font-size:20px;color:#ff6b35}
+.status{display:inline-block;width:10px;height:10px;border-radius:50%;background:#4caf50;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.container{max-width:900px;margin:0 auto;padding:16px}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
+.stat{background:#1a1a2e;border-radius:8px;padding:16px;text-align:center}
+.stat-num{font-size:28px;font-weight:700;color:#ff6b35}
+.stat-label{font-size:12px;color:#888;margin-top:4px}
+.section{background:#1a1a2e;border-radius:8px;padding:16px;margin-bottom:16px}
+.section h2{font-size:14px;color:#888;text-transform:uppercase;margin-bottom:12px}
+.msg{padding:8px 12px;border-radius:6px;margin-bottom:6px;font-size:13px;line-height:1.4;word-break:break-word}
+.msg-user{background:#16213e;border-left:3px solid #ff6b35}
+.msg-bot{background:#1a1a2e;border-left:3px solid #4caf50}
+.msg-time{font-size:11px;color:#666}
+.msg-text{margin-top:2px}
+.task{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#16213e;border-radius:6px;margin-bottom:6px;font-size:13px}
+.task-done{opacity:.5;text-decoration:line-through}
+.pri-high{color:#ff4444}.pri-medium{color:#ffaa00}.pri-low{color:#4caf50}
+.refresh{position:fixed;bottom:20px;right:20px;background:#ff6b35;color:#fff;border:none;border-radius:50%;width:48px;height:48px;font-size:20px;cursor:pointer;box-shadow:0 4px 12px rgba(255,107,53,.4)}
+.refresh:hover{transform:scale(1.1)}
+.ts{color:#555;font-size:11px;text-align:center;padding:8px}
+</style>
+</head>
+<body>
+<div class="header">
+<div class="status"></div>
+<h1>BossYoki Bot</h1>
+<span style="color:#888;font-size:13px">Dashboard</span>
+</div>
+<div class="container">
+<div class="stats" id="stats"></div>
+<div class="section">
+<h2>Последние сообщения</h2>
+<div id="messages"><div class="ts">Загрузка...</div></div>
+</div>
+<div class="section">
+<h2>Задачи</h2>
+<div id="tasks"><div class="ts">Загрузка...</div></div>
+</div>
+</div>
+<button class="refresh" onclick="load()" title="Обновить">&#8635;</button>
+<script>
+function load(){
+fetch('/api/data').then(r=>r.json()).then(d=>{
+document.getElementById('stats').innerHTML=
+'<div class="stat"><div class="stat-num">'+d.stats.active+'</div><div class="stat-label">Активных</div></div>'+
+'<div class="stat"><div class="stat-num">'+d.stats.done+'</div><div class="stat-label">Выполнено</div></div>'+
+'<div class="stat"><div class="stat-num">'+d.stats.today+'</div><div class="stat-label">Сегодня</div></div>'+
+'<div class="stat"><div class="stat-num">'+d.stats.overdue+'</div><div class="stat-label">Просрочено</div></div>';
+let mh='';
+d.messages.forEach(m=>{
+let cls=m.role=='user'?'msg-user':'msg-bot';
+let icon=m.role=='user'?'&#128100;':'&#129302;';
+mh+='<div class="msg '+cls+'"><div class="msg-time">'+icon+' '+m.time+'</div><div class="msg-text">'+esc(m.message)+'</div></div>';
+});
+document.getElementById('messages').innerHTML=mh||'<div class="ts">Нет сообщений</div>';
+let th='';
+d.tasks.forEach(t=>{
+let cls=t.status=='done'?'task-done':'';
+let pri=t.priority=='high'?'&#128308;':t.priority=='low'?'&#128994;':'&#128992;';
+th+='<div class="task '+cls+'"><span>'+pri+'</span><span>#'+t.id+'</span><span>'+esc(t.title)+'</span><span style="color:#666;margin-left:auto">'+(t.deadline||'')+'</span></div>';
+});
+document.getElementById('tasks').innerHTML=th||'<div class="ts">Нет задач</div>';
+}).catch(()=>{document.getElementById('messages').innerHTML='<div class="ts">Бот не отвечает (возможно засыпает)</div>'});
+}
+function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+load();
+setInterval(load,30000);
+</script>
+</body>
+</html>'''
+
+class DashboardHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        self.send_response(200)
-        self.send_header('Content-Type', 'text/plain')
-        self.end_headers()
-        self.wfile.write(b'OK')
+        path = urlparse(self.path).path
+        try:
+            if path == '/api/data':
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json; charset=utf-8')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                data = self._get_api_data()
+                self.wfile.write(json.dumps(data, ensure_ascii=False).encode('utf-8'))
+            else:
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/html; charset=utf-8')
+                self.end_headers()
+                self.wfile.write(DASHBOARD_HTML.encode('utf-8'))
+        except Exception as e:
+            self.send_response(500)
+            self.end_headers()
+            self.wfile.write(str(e).encode())
+
+    def _get_api_data(self):
+        conn = sqlite3.connect(DB_FILE)
+        conn.row_factory = sqlite3.Row
+        try:
+            msgs = []
+            for r in conn.execute(
+                "SELECT role, message, created_at FROM conversations ORDER BY id DESC LIMIT 30"
+            ).fetchall():
+                row = dict(r)
+                t = row.get('created_at', '')
+                row['time'] = t[11:16] if len(t) > 16 else t[:5]
+                msgs.append(row)
+            msgs.reverse()
+            tasks = [dict(r) for r in conn.execute(
+                "SELECT id, title, priority, deadline, status FROM tasks WHERE user_id = ? ORDER BY id DESC LIMIT 50",
+                (VK_USER_ID,)
+            ).fetchall()]
+            stats = {
+                'active': conn.execute("SELECT COUNT(*) FROM tasks WHERE user_id = ? AND status = 'active'", (VK_USER_ID,)).fetchone()[0],
+                'done': conn.execute("SELECT COUNT(*) FROM tasks WHERE user_id = ? AND status = 'done'", (VK_USER_ID,)).fetchone()[0],
+                'today': conn.execute("SELECT COUNT(*) FROM tasks WHERE user_id = ? AND status = 'active' AND deadline = date('now')", (VK_USER_ID,)).fetchone()[0],
+                'overdue': conn.execute("SELECT COUNT(*) FROM tasks WHERE user_id = ? AND status = 'active' AND deadline < date('now')", (VK_USER_ID,)).fetchone()[0],
+            }
+        finally:
+            conn.close()
+        return {'messages': msgs, 'tasks': tasks, 'stats': stats}
+
     def log_message(self, format, *args):
         pass
 
 def start_health_server():
     try:
-        server = HTTPServer(('0.0.0.0', PORT), HealthHandler)
-        print(f'Health server started on port {PORT}', flush=True)
+        server = HTTPServer(('0.0.0.0', PORT), DashboardHandler)
+        print(f'Dashboard started on port {PORT}', flush=True)
         server.serve_forever()
     except Exception as e:
-        print(f'Health server error: {e}', flush=True)
+        print(f'Dashboard server error: {e}', flush=True)
 
 
 def main():
