@@ -482,7 +482,14 @@ def ask_ai(text, user_id):
         # Парсим команды AI
         parse_ai_actions(reply, user_id)
 
-        return reply
+        # Убираем команды из ответа чтобы пользователь не видел [ADD: ...]
+        clean = re.sub(r'\[ADD:\s*.+?\]', '', reply)
+        clean = re.sub(r'\[DONE:\s*\d+\]', '', clean)
+        clean = re.sub(r'\[DEL:\s*\d+\]', '', clean)
+        clean = clean.strip()
+        if not clean:
+            clean = 'Готово!'
+        return clean
     except Exception as e:
         log.error(f'AI error: {e}')
         return None
@@ -638,9 +645,14 @@ def handle_reminder(text, user_id):
     if t.startswith('напомни ') or re.match(r'через \d+ (минут|секунд|час)', t):
         remind_at, task_text = parse_reminder_time(t)
         if remind_at and task_text:
-            task_id = add_task(user_id, task_text, remind_at.strftime('%Y-%m-%d'), 'medium')
+            # Убираем "напомни мне", "напомни" из текста задачи
+            clean = re.sub(r'^напомни\s+(мне\s+)?', '', task_text, flags=re.IGNORECASE).strip()
+            if not clean:
+                clean = task_text
+            time_str = remind_at.strftime('%H:%M')
+            task_id = add_task(user_id, clean, remind_at.strftime('%Y-%m-%d'), 'medium', time=time_str)
             add_reminder(task_id, remind_at.strftime('%Y-%m-%d %H:%M:%S'))
-            return f'⏰ Напоминание на {remind_at.strftime("%d.%m %H:%M")}: {task_text}'
+            return f'⏰ Напоминание в {time_str}: {clean}'
         return 'Не понял время.\nПример: напомни через 30 минут позвонить'
 
     if t in ['напоминания', 'активные напоминания']:
@@ -717,88 +729,64 @@ def periodic_sync():
         time.sleep(300)
 
 
-# === Ежедневный отчёт ===
+# === Автоотчёт каждые 10 минут ===
 
-_daily_report_sent = {}
+_report_counter = 0
 
 def check_daily_report():
-    """Отправляет ежедневный отчёт в 9:00 и напоминание о задачах в 13:00 и 18:00"""
-    global _daily_report_sent
+    """Отправляет сводку каждые 10 минут"""
+    global _report_counter
     while True:
         try:
-            now = datetime.now()
-            today = now.strftime('%Y-%m-%d')
-            hour = now.hour
-            minute = now.minute
-
-            # Ключ чтобы не слать дважды в ту же минуту
-            report_key = f'{today}_{hour}'
-
-            if report_key in _daily_report_sent:
-                time.sleep(60)
-                continue
-
-            # Утренний отчёт в 9:00 (±1 мин)
-            if hour == 9 and minute < 2:
-                _daily_report_sent[report_key] = True
-                send_daily_summary(VK_USER_ID, 'morning')
-
-            # Дневная проверка в 13:00 (±1 мин)
-            elif hour == 13 and minute < 2:
-                _daily_report_sent[report_key] = True
-                send_daily_summary(VK_USER_ID, 'afternoon')
-
-            # Вечерняя проверка в 18:00 (±1 мин)
-            elif hour == 18 and minute < 2:
-                _daily_report_sent[report_key] = True
-                send_daily_summary(VK_USER_ID, 'evening')
-
+            time.sleep(600)  # 10 минут
+            _report_counter += 1
+            send_periodic_summary(VK_USER_ID, _report_counter)
         except Exception as e:
-            log.error(f'Daily report error: {e}')
-        time.sleep(60)
+            log.error(f'Periodic report error: {e}')
 
 
-def send_daily_summary(user_id, period):
-    """Отправляет сводку по задачам"""
+def send_periodic_summary(user_id, count):
+    """Отправляет краткую сводку"""
     stats = get_stats(user_id)
     tasks = get_tasks(user_id)
-    today_tasks = [t for t in tasks if t.get('deadline') == datetime.now().strftime('%Y-%m-%d')]
-    overdue = [t for t in tasks if t.get('deadline') and t['deadline'] < datetime.now().strftime('%Y-%m-%d')]
+    today_str = datetime.now().strftime('%Y-%m-%d')
+    today_tasks = [t for t in tasks if t.get('deadline') == today_str]
+    overdue = [t for t in tasks if t.get('deadline') and t['deadline'] < today_str]
 
-    if period == 'morning':
-        header = '🌅 Доброе утро!'
-        if today_tasks:
-            lines = [f'📋 Сегодня дел: {len(today_tasks)}']
-            for t in today_tasks:
-                time_str = f" в {t['time']}" if t.get('time') else ''
-                lines.append(f'  • {t["title"]}{time_str}')
-            if overdue:
-                lines.append(f'\n⚠️ Просрочено: {len(overdue)}')
-            msg = header + '\n\n' + '\n'.join(lines) + '\n\n💪 Давай!'
-        else:
-            msg = header + '\n\n📋 На сегодня задач нет.\nДобавь что-нибудь: "добавить [текст]"'
+    # Определяем время суток для приветствия
+    hour = datetime.now().hour
+    if 6 <= hour < 12:
+        greeting = '☀️'
+    elif 12 <= hour < 18:
+        greeting = '🌤'
+    else:
+        greeting = '🌙'
 
-    elif period == 'afternoon':
-        header = '☀️ Середина дня'
-        if stats['done'] > 0:
-            msg = f'{header}\n\n✅ Выполнено: {stats["done"]}\n📋 Осталось: {stats["active"]}\n\n🔥 Продолжай!'
-        elif today_tasks:
-            msg = f'{header}\n\n⚠️ Ещё ничего не сделано!\n📋 Дел: {len(today_tasks)}\n\n💬 Напиши "выполни [номер]" когда сделаешь'
-        else:
-            return  # Нет задач — не беспокоим
+    lines = [f'{greeting} Сводка #{count}:']
 
-    elif period == 'evening':
-        header = '🌙 Вечерний итог'
-        if stats['done'] > 0:
-            msg = f'{header}\n\n✅ Выполнено сегодня: {stats["done"]}\n📋 Активных: {stats["active"]}\n\nОтдыхай, ты заслужил! 😎'
-        else:
-            msg = f'{header}\n\n📋 Сегодня ничего не выполнено.\nЗавтра постарайся лучше! 💪'
+    if today_tasks:
+        done_today = [t for t in today_tasks if t['status'] == 'done']
+        pending_today = [t for t in today_tasks if t['status'] == 'active']
+        lines.append(f'📋 Сегодня: {len(done_today)}✅ / {len(pending_today)}⏳')
+        for t in pending_today[:5]:
+            time_str = f" в {t['time']}" if t.get('time') else ''
+            lines.append(f'  • {t["title"]}{time_str}')
+        if len(pending_today) > 5:
+            lines.append(f'  ... и ещё {len(pending_today) - 5}')
+    else:
+        lines.append('📋 На сегодня задач нет')
 
+    if overdue:
+        lines.append(f'⚠️ Просрочено: {len(overdue)}')
+
+    lines.append(f'\n📊 Всего: {stats["done"]}✅ / {stats["active"]}⏳')
+
+    msg = '\n'.join(lines)
     try:
         send_vk_message(user_id, msg)
-        log.info(f'📊 Ежедневный отчёт ({period}): отправлен')
+        log.info(f'📊 Автоотчёт #{count} отправлен')
     except Exception as e:
-        log.error(f'Daily report send error: {e}')
+        log.error(f'Periodic summary send error: {e}')
 
 
 # === Обработка сообщений ===
@@ -876,6 +864,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .msg-text{margin-top:2px}
 .task{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#16213e;border-radius:6px;margin-bottom:6px;font-size:13px}
 .task-done{opacity:.5;text-decoration:line-through}
+.done-btn{background:#4caf50;color:#fff;border:none;border-radius:4px;padding:4px 8px;font-size:11px;cursor:pointer;margin-left:auto;white-space:nowrap}
+.done-btn:hover{background:#66bb6a}
 .pri-high{color:#ff4444}.pri-medium{color:#ffaa00}.pri-low{color:#4caf50}
 .refresh{position:fixed;bottom:20px;right:20px;background:#ff6b35;color:#fff;border:none;border-radius:50%;width:48px;height:48px;font-size:20px;cursor:pointer;box-shadow:0 4px 12px rgba(255,107,53,.4)}
 .refresh:hover{transform:scale(1.1)}
@@ -919,12 +909,17 @@ let th='';
 d.tasks.forEach(t=>{
 let cls=t.status=='done'?'task-done':'';
 let pri=t.priority=='high'?'&#128308;':t.priority=='low'?'&#128994;':'&#128992;';
-th+='<div class="task '+cls+'"><span>'+pri+'</span><span>#'+t.id+'</span><span>'+esc(t.title)+'</span><span style="color:#666;margin-left:auto">'+(t.deadline||'')+(t.time?' в '+t.time:'')+'</span></div>';
+let btn=t.status=='active'?'<button class="done-btn" onclick="done('+t.id+')">&#10003; Готово</button>':'&#10004;';
+th+='<div class="task '+cls+'"><span>'+pri+'</span><span>#'+t.id+'</span><span>'+esc(t.title)+'</span><span style="color:#666">'+(t.deadline||'')+(t.time?' в '+t.time:'')+'</span>'+btn+'</div>';
 });
 document.getElementById('tasks').innerHTML=th||'<div class="ts">Нет задач</div>';
 }).catch(()=>{document.getElementById('messages').innerHTML='<div class="ts">Бот не отвечает (возможно засыпает)</div>'});
 }
 function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+function done(id){
+fetch('/api/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:id})})
+.then(r=>r.json()).then(()=>load()).catch(()=>alert('Ошибка'));
+}
 load();
 setInterval(load,30000);
 </script>
@@ -952,6 +947,39 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(str(e).encode())
 
+    def do_POST(self):
+        path = urlparse(self.path).path
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+
+            if path == '/api/complete':
+                task_id = body.get('task_id')
+                if task_id:
+                    success = complete_task(VK_USER_ID, int(task_id))
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({'ok': success}).encode())
+                else:
+                    self.send_response(400)
+                    self.end_headers()
+            else:
+                self.send_response(404)
+                self.end_headers()
+        except Exception as e:
+            self.send_response(500)
+            self.end_headers()
+            self.wfile.write(str(e).encode())
+
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.end_headers()
+
     def _get_api_data(self):
         conn = sqlite3.connect(DB_FILE)
         conn.row_factory = sqlite3.Row
@@ -962,16 +990,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
             ).fetchall():
                 row = dict(r)
                 t = row.get('created_at', '')
-                # SQLite хранит UTC — конвертируем в местное время
+                # SQLite хранит UTC — конвертируем в Moscow time (UTC+3)
                 try:
                     from datetime import datetime as dt2
-                    from zoneinfo import ZoneInfo
-                    utc = dt2.strptime(t[:19], '%Y-%m-%d %H:%M:%S').replace(tzinfo=ZoneInfo('UTC'))
-                    local = utc.astimezone()
+                    utc = dt2.strptime(t[:19], '%Y-%m-%d %H:%M:%S')
+                    local = utc + timedelta(hours=3)
                     row['time'] = local.strftime('%H:%M')
                     row['date'] = local.strftime('%d.%m')
                 except Exception:
-                    # Fallback: просто берём как есть
                     row['time'] = t[11:16] if len(t) > 16 else t[:5]
                     row['date'] = t[:10]
                 msgs.append(row)
