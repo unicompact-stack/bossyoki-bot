@@ -1,29 +1,6 @@
 {
   "version": "2.0",
   "source": "vk_bot",
-  "updatedAt": "2026-07-16T07:57:16.665067",
-  "tasks": [
-    {
-      "id": "1",
-      "title": "позвонить жене",
-      "note": "",
-      "date": "2026-07-16",
-      "time": "",
-      "priority": "medium",
-      "category": "",
-      "done": false,
-      "created": "2026-07-16 07:45:49"
-    },
-    {
-      "id": "2",
-      "title": "позвонить другу",
-      "note": "",
-      "date": "2026-07-16",
-      "time": "",
-      "priority": "medium",
-      "category": "",
-      "done": false,
-      "created": "2026-07-16 07:46:11"
-    }
-  ]
+  "updatedAt": "2026-07-16T08:01:14.672419",
+  "tasks": []
 }
