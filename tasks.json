@@ -1,51 +1,6 @@
 {
   "version": "2.0",
   "source": "vk_bot",
-  "updatedAt": "2026-07-16T15:01:38.493526",
-  "tasks": [
-    {
-      "id": "1",
-      "title": "позвонить жене",
-      "note": "",
-      "date": "2026-07-16",
-      "time": "",
-      "priority": "medium",
-      "category": "",
-      "done": false,
-      "created": "2026-07-16 08:18:24"
-    },
-    {
-      "id": "2",
-      "title": "съездить на участок через 10 минут",
-      "note": "",
-      "date": "",
-      "time": "",
-      "priority": "medium",
-      "category": "",
-      "done": false,
-      "created": "2026-07-16 09:46:06"
-    },
-    {
-      "id": "3",
-      "title": "задача напомни мне решить вопрос с дверью",
-      "note": "",
-      "date": "",
-      "time": "",
-      "priority": "medium",
-      "category": "",
-      "done": false,
-      "created": "2026-07-16 10:10:49"
-    },
-    {
-      "id": "4",
-      "title": "доделать авито",
-      "note": "",
-      "date": "2026-07-16",
-      "time": "",
-      "priority": "medium",
-      "category": "",
-      "done": false,
-      "created": "2026-07-16 10:15:15"
-    }
-  ]
+  "updatedAt": "2026-07-16T15:05:29.552328",
+  "tasks": []
 }
