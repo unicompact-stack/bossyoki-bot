@@ -81,6 +81,8 @@ def init_db():
         message TEXT NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )''')
+    # Очищаем сообщения старше 30 дней
+    conn.execute("DELETE FROM conversations WHERE created_at < datetime('now', '-30 days')")
     conn.commit()
     conn.close()
 
@@ -185,8 +187,17 @@ def get_stats(user_id):
 
 # === GitHub Sync ===
 
-def sync_to_github():
-    """Отправляет задачи в GitHub tasks.json"""
+_last_sync_time = 0
+_SYNC_INTERVAL = 300  # 5 минут
+
+def sync_to_github(force=False):
+    """Отправляет задачи в GitHub tasks.json (debounce 5 мин)"""
+    global _last_sync_time
+    now = time.time()
+    if not force and (now - _last_sync_time) < _SYNC_INTERVAL:
+        return
+    _last_sync_time = now
+
     if not GITHUB_KEY or not GITHUB_KEY.startswith('ghp_'):
         return
     try:
@@ -501,7 +512,9 @@ def parse_ai_actions(reply, user_id):
         elif deadline and re.match(r'\d{4}-\d{2}-\d{2}', deadline):
             pass  # Уже в правильном формате
         elif deadline and re.match(r'\d{2}\.\d{2}', deadline):
-            deadline = datetime.now().strftime('%Y') + '-' + deadline[::-1][:4][::-1]
+            # Парсим "20.07" → "2026-07-20"
+            day, month = deadline.split('.')
+            deadline = f'{datetime.now().year}-{month}-{day}'
         else:
             deadline = datetime.now().strftime('%Y-%m-%d')
 
@@ -681,7 +694,7 @@ def periodic_sync():
     """Синхронизация с GitHub каждые 5 минут"""
     while True:
         try:
-            sync_to_github()
+            sync_to_github(force=True)
         except Exception as e:
             log.error(f'Periodic sync error: {e}')
         time.sleep(300)
@@ -848,14 +861,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
             ).fetchall():
                 row = dict(r)
                 t = row.get('created_at', '')
-                # SQLite хранит UTC — конвертируем в местное время (UTC+3)
+                # SQLite хранит UTC — конвертируем в местное время
                 try:
                     from datetime import datetime as dt2
-                    utc = dt2.strptime(t[:19], '%Y-%m-%d %H:%M:%S')
-                    local = utc + timedelta(hours=3)
+                    from zoneinfo import ZoneInfo
+                    utc = dt2.strptime(t[:19], '%Y-%m-%d %H:%M:%S').replace(tzinfo=ZoneInfo('UTC'))
+                    local = utc.astimezone()
                     row['time'] = local.strftime('%H:%M')
                     row['date'] = local.strftime('%d.%m')
-                except:
+                except Exception:
+                    # Fallback: просто берём как есть
                     row['time'] = t[11:16] if len(t) > 16 else t[:5]
                     row['date'] = t[:10]
                 msgs.append(row)
