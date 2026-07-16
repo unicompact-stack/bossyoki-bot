@@ -188,10 +188,10 @@ def get_stats(user_id):
 # === GitHub Sync ===
 
 _last_sync_time = 0
-_SYNC_INTERVAL = 300  # 5 минут
+_SYNC_INTERVAL = 30  # 30 секунд минимум между синхронизациями
 
 def sync_to_github(force=False):
-    """Отправляет задачи в GitHub tasks.json (debounce 5 мин)"""
+    """Отправляет задачи в GitHub tasks.json"""
     global _last_sync_time
     now = time.time()
     if not force and (now - _last_sync_time) < _SYNC_INTERVAL:
@@ -199,6 +199,7 @@ def sync_to_github(force=False):
     _last_sync_time = now
 
     if not GITHUB_KEY or not GITHUB_KEY.startswith('ghp_'):
+        log.warning('⚠️ GitHub токен не настроен, синхронизация невозможна')
         return
     try:
         conn = get_db()
@@ -254,11 +255,11 @@ def sync_to_github(force=False):
             timeout=10
         )
         if r.status_code in (200, 201):
-            log.info('✅ Задачи синхронизированы с GitHub')
+            log.info(f'✅ GitHub sync OK: {len(tasks_list)} задач')
         else:
-            log.warning(f'GitHub sync: {r.status_code}')
+            log.error(f'❌ GitHub sync failed: {r.status_code} — {r.text[:200]}')
     except Exception as e:
-        log.error(f'GitHub sync error: {e}')
+        log.error(f'❌ GitHub sync error: {e}')
 
 
 def load_from_github():
