@@ -316,18 +316,20 @@ def mark_reminder_sent(reminder_id):
 def parse_reminder_time(text):
     t = text.lower().strip()
 
-    match = re.match(r'напомни через (\d+) (минут[уыа]?|секунд[уыа]?) (.+)', t)
+    match = re.match(r'(?:напомни )?через (\d+) (минут[уыа]?|секунд[уыа]?|час[аов]*) (.+)', t)
     if match:
         amount = int(match.group(1))
         unit = match.group(2)
         task_text = match.group(3)
         if 'секунд' in unit:
             remind_at = datetime.now() + timedelta(seconds=amount)
+        elif 'час' in unit:
+            remind_at = datetime.now() + timedelta(hours=amount)
         else:
             remind_at = datetime.now() + timedelta(minutes=amount)
         return remind_at, task_text
 
-    match = re.match(r'напомни завтра (\d{1,2}[:\.]?\d{0,2}) (.+)', t)
+    match = re.match(r'(?:напомни )?завтра (\d{1,2}[:\.]?\d{0,2}) (.+)', t)
     if match:
         time_str = match.group(1).replace('.', ':')
         task_text = match.group(2)
@@ -337,13 +339,23 @@ def parse_reminder_time(text):
         remind_at = datetime.now().replace(hour=h, minute=m, second=0) + timedelta(days=1)
         return remind_at, task_text
 
-    match = re.match(r'напомни сегодня (\d{1,2}[:\.]?\d{0,2}) (.+)', t)
+    match = re.match(r'(?:напомни )?сегодня (\d{1,2}[:\.]?\d{0,2}) (.+)', t)
     if match:
         time_str = match.group(1).replace('.', ':')
         task_text = match.group(2)
         if ':' not in time_str:
             time_str += ':00'
         h, m = map(int, time_str.split(':'))
+        remind_at = datetime.now().replace(hour=h, minute=m, second=0)
+        if remind_at < datetime.now():
+            remind_at += timedelta(days=1)
+        return remind_at, task_text
+
+    match = re.match(r'(?:напомни )?в (\d{1,2})[:\.]?(\d{0,2}) (.+)', t)
+    if match:
+        h = int(match.group(1))
+        m = int(match.group(2)) if match.group(2) else 0
+        task_text = match.group(3)
         remind_at = datetime.now().replace(hour=h, minute=m, second=0)
         if remind_at < datetime.now():
             remind_at += timedelta(days=1)
@@ -593,7 +605,7 @@ def handle_tasks(text, user_id):
 def handle_reminder(text, user_id):
     t = text.lower().strip()
 
-    if t.startswith('напомни '):
+    if t.startswith('напомни ') or re.match(r'через \d+ (минут|секунд|час)', t):
         remind_at, task_text = parse_reminder_time(t)
         if remind_at and task_text:
             task_id = add_task(user_id, task_text, remind_at.strftime('%Y-%m-%d'), 'medium')
@@ -786,7 +798,7 @@ let mh='';
 d.messages.forEach(m=>{
 let cls=m.role=='user'?'msg-user':'msg-bot';
 let icon=m.role=='user'?'&#128100;':'&#129302;';
-mh+='<div class="msg '+cls+'"><div class="msg-time">'+icon+' '+m.time+'</div><div class="msg-text">'+esc(m.message)+'</div></div>';
+mh+='<div class="msg '+cls+'"><div class="msg-time">'+icon+' '+m.date+' '+m.time+'</div><div class="msg-text">'+esc(m.message)+'</div></div>';
 });
 document.getElementById('messages').innerHTML=mh||'<div class="ts">Нет сообщений</div>';
 let th='';
@@ -836,7 +848,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
             ).fetchall():
                 row = dict(r)
                 t = row.get('created_at', '')
-                row['time'] = t[11:16] if len(t) > 16 else t[:5]
+                # SQLite хранит UTC — конвертируем в местное время (UTC+3)
+                try:
+                    from datetime import datetime as dt2
+                    utc = dt2.strptime(t[:19], '%Y-%m-%d %H:%M:%S')
+                    local = utc + timedelta(hours=3)
+                    row['time'] = local.strftime('%H:%M')
+                    row['date'] = local.strftime('%d.%m')
+                except:
+                    row['time'] = t[11:16] if len(t) > 16 else t[:5]
+                    row['date'] = t[:10]
                 msgs.append(row)
             msgs.reverse()
             tasks = [dict(r) for r in conn.execute(
