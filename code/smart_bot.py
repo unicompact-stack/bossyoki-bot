@@ -206,6 +206,12 @@ def sync_to_github(force=False):
         rows = conn.execute('SELECT * FROM tasks WHERE user_id = ? ORDER BY id', (VK_USER_ID,)).fetchall()
         conn.close()
 
+        # Если в БД нет задач — не перезаписываем GitHub (загружаем оттуда)
+        if len(rows) == 0:
+            log.info('⚠️ БД пуста, пропускаю sync (загружаю из GitHub)')
+            load_from_github()
+            return
+
         tasks_list = []
         for r in rows:
             tasks_list.append({
