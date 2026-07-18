@@ -54,6 +54,7 @@ def get_db():
 
 def init_db():
     conn = get_db()
+    conn.execute('PRAGMA foreign_keys = ON')
     conn.execute('''CREATE TABLE IF NOT EXISTS tasks (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
@@ -188,10 +189,14 @@ def get_stats(user_id):
 
 _last_sync_time = 0
 _SYNC_INTERVAL = 30  # 30 секунд минимум
+_github_loaded = False  # Блокировка до загрузки из GitHub
 
 def sync_to_github(force=False):
     """Бот пишет в GitHub tasks.json — главный источник"""
     global _last_sync_time
+    if not _github_loaded:
+        log.info('⏳ GitHub ещё не загружен, пропускаю sync')
+        return
     now = time.time()
     if not force and (now - _last_sync_time) < _SYNC_INTERVAL:
         return
@@ -204,6 +209,12 @@ def sync_to_github(force=False):
         conn = get_db()
         rows = conn.execute('SELECT * FROM tasks WHERE user_id = ? ORDER BY id', (VK_USER_ID,)).fetchall()
         conn.close()
+
+        # Если в БД нет задач — не перезаписываем GitHub (загружаем оттуда)
+        if len(rows) == 0:
+            log.info('⚠️ БД пуста, пропускаю sync (загружаю из GitHub)')
+            load_from_github()
+            return
 
         tasks_list = []
         for r in rows:
@@ -745,25 +756,26 @@ def periodic_sync():
 _report_sent_today = {}
 
 def check_daily_report():
-    """Отправляет отчёт утром (9:00) и вечером (21:00)"""
+    """Отправляет отчёт утром (9:00-10:00) и вечером (21:00-22:00)"""
     while True:
         try:
             now = datetime.now()
             today = now.strftime('%Y-%m-%d')
             hour = now.hour
-            minute = now.minute
 
-            # Утренний отчёт в 9:00 (окно 9:00-9:02)
+            # Утренний отчёт (окно 9:00-10:00)
             morning_key = f'{today}_morning'
-            if hour == 9 and minute < 3 and morning_key not in _report_sent_today:
+            if 9 <= hour < 10 and morning_key not in _report_sent_today:
                 _report_sent_today[morning_key] = True
                 send_morning_report(VK_USER_ID)
+                log.info('☀️ Утренний отчёт отправлен')
 
-            # Вечерний отчёт в 21:00 (окно 21:00-21:02)
+            # Вечерний отчёт (окно 21:00-22:00)
             evening_key = f'{today}_evening'
-            if hour == 21 and minute < 3 and evening_key not in _report_sent_today:
+            if 21 <= hour < 22 and evening_key not in _report_sent_today:
                 _report_sent_today[evening_key] = True
                 send_evening_report(VK_USER_ID)
+                log.info('🌙 Вечерний отчёт отправлен')
 
         except Exception as e:
             log.error(f'Daily report error: {e}')
@@ -1095,6 +1107,8 @@ def main():
 
     # Загружаем задачи из GitHub при старте
     load_from_github()
+    _github_loaded = True
+    log.info('✅ GitHub загружен, sync разрешён')
 
     with open(PID_FILE, 'w') as f:
         f.write(str(os.getpid()))
