@@ -61,6 +61,9 @@ logging.basicConfig(
 )
 log = logging.getLogger('smart_bot')
 
+VERSION = '2.1.0'
+BUILD_TIME = get_moscow_now().strftime('%d.%m.%Y %H:%M')
+
 
 # === БД ===
 
@@ -980,6 +983,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 <div class="status"></div>
 <h1>BossYoki Bot</h1>
 <span style="color:#888;font-size:13px">Dashboard</span>
+<span style="color:#555;font-size:11px;margin-left:auto">v{VERSION} | {BUILD_TIME}</span>
 </div>
 <div class="container">
 <div style="background:#16213e;border-radius:8px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:8px;font-size:12px;color:#888"><div style="width:8px;height:8px;border-radius:50%;background:#4caf50"></div><span id="sync-text">Данные: Supabase PostgreSQL</span></div>
