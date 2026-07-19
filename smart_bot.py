@@ -15,7 +15,8 @@ import threading
 import time
 import psycopg2
 import requests
-from datetime import datetime, timedelta
+import pytz
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 import vk_api
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
@@ -34,6 +35,21 @@ LOG_FILE = os.path.join(DIR, 'smart_bot.log')
 PID_FILE = os.path.join(DIR, 'smart_bot.pid')
 GITHUB_REPO = 'unicompact-stack/bossyoki'
 GITHUB_FILE = 'tasks.json'
+
+MOSCOW_TZ = pytz.timezone('Europe/Moscow')
+
+def get_moscow_now():
+    return datetime.now(MOSCOW_TZ)
+
+def to_utc(local_dt):
+    if local_dt.tzinfo is None:
+        local_dt = MOSCOW_TZ.localize(local_dt)
+    return local_dt.astimezone(pytz.UTC)
+
+def from_utc(utc_dt):
+    if utc_dt.tzinfo is None:
+        utc_dt = pytz.UTC.localize(utc_dt)
+    return utc_dt.astimezone(MOSCOW_TZ)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -146,7 +162,7 @@ def get_tasks(user_id, status='active'):
 def complete_task(user_id, task_id):
     conn = get_db()
     cur = conn.cursor()
-    now = datetime.now().isoformat()
+    now = get_moscow_now().isoformat()
     cur.execute(
         "UPDATE tasks SET status = 'done', completed_at = %s WHERE id = %s AND user_id = %s",
         (now, task_id, user_id)
@@ -244,7 +260,7 @@ def sync_to_github(force=False):
         data = json.dumps({
             'version': '2.0',
             'source': 'vk_bot',
-            'updatedAt': datetime.now().isoformat(),
+            'updatedAt': get_moscow_now().isoformat(),
             'tasks': tasks_list
         }, ensure_ascii=False, indent=2)
 
@@ -263,7 +279,7 @@ def sync_to_github(force=False):
 
         # Записываем
         body = {
-            'message': f'🔄 Бот обновил задачи ({datetime.now().strftime("%H:%M")})',
+            'message': f'🔄 Бот обновил задачи ({get_moscow_now().strftime("%H:%M")})',
             'content': __import__('base64').b64encode(data.encode()).decode(),
         }
         if sha:
@@ -324,16 +340,22 @@ def load_from_github():
 # === Напоминания ===
 
 def add_reminder(task_id, remind_at):
+    if isinstance(remind_at, str):
+        remind_at = datetime.strptime(remind_at, '%Y-%m-%d %H:%M:%S')
+        remind_at = MOSCOW_TZ.localize(remind_at)
+    if remind_at.tzinfo is None:
+        remind_at = MOSCOW_TZ.localize(remind_at)
+    remind_at_utc = remind_at.astimezone(pytz.UTC)
     conn = get_db()
     cur = conn.cursor()
-    cur.execute('INSERT INTO reminders (task_id, remind_at) VALUES (%s, %s)', (task_id, remind_at))
+    cur.execute('INSERT INTO reminders (task_id, remind_at) VALUES (%s, %s)', (task_id, remind_at_utc.strftime('%Y-%m-%d %H:%M:%S')))
     conn.commit()
     conn.close()
 
 def get_pending_reminders():
     conn = get_db()
     cur = conn.cursor()
-    now = datetime.now().isoformat()
+    now = datetime.now(pytz.UTC).isoformat()
     cur.execute(
         'SELECT r.id, r.task_id, r.remind_at, t.title, t.user_id FROM reminders r '
         'JOIN tasks t ON r.task_id = t.id WHERE r.sent = 0 AND r.remind_at <= %s',
@@ -353,6 +375,7 @@ def mark_reminder_sent(reminder_id):
 
 def parse_reminder_time(text):
     t = text.lower().strip()
+    moscow_now = get_moscow_now()
 
     match = re.match(r'(?:напомни )?через (\d+) (минут[уыа]?|секунд[уыа]?|час[аов]*) (.+)', t)
     if match:
@@ -360,11 +383,11 @@ def parse_reminder_time(text):
         unit = match.group(2)
         task_text = match.group(3)
         if 'секунд' in unit:
-            remind_at = datetime.now() + timedelta(seconds=amount)
+            remind_at = moscow_now + timedelta(seconds=amount)
         elif 'час' in unit:
-            remind_at = datetime.now() + timedelta(hours=amount)
+            remind_at = moscow_now + timedelta(hours=amount)
         else:
-            remind_at = datetime.now() + timedelta(minutes=amount)
+            remind_at = moscow_now + timedelta(minutes=amount)
         return remind_at, task_text
 
     match = re.match(r'(?:напомни )?завтра (\d{1,2}[:\.]?\d{0,2}) (.+)', t)
@@ -374,7 +397,7 @@ def parse_reminder_time(text):
         if ':' not in time_str:
             time_str += ':00'
         h, m = map(int, time_str.split(':'))
-        remind_at = datetime.now().replace(hour=h, minute=m, second=0) + timedelta(days=1)
+        remind_at = moscow_now.replace(hour=h, minute=m, second=0) + timedelta(days=1)
         return remind_at, task_text
 
     match = re.match(r'(?:напомни )?сегодня (\d{1,2}[:\.]?\d{0,2}) (.+)', t)
@@ -384,8 +407,8 @@ def parse_reminder_time(text):
         if ':' not in time_str:
             time_str += ':00'
         h, m = map(int, time_str.split(':'))
-        remind_at = datetime.now().replace(hour=h, minute=m, second=0)
-        if remind_at < datetime.now():
+        remind_at = moscow_now.replace(hour=h, minute=m, second=0)
+        if remind_at < moscow_now:
             remind_at += timedelta(days=1)
         return remind_at, task_text
 
@@ -394,8 +417,8 @@ def parse_reminder_time(text):
         h = int(match.group(1))
         m = int(match.group(2)) if match.group(2) else 0
         task_text = match.group(3)
-        remind_at = datetime.now().replace(hour=h, minute=m, second=0)
-        if remind_at < datetime.now():
+        remind_at = moscow_now.replace(hour=h, minute=m, second=0)
+        if remind_at < moscow_now:
             remind_at += timedelta(days=1)
         return remind_at, task_text
 
@@ -484,7 +507,7 @@ def ask_ai(text, user_id):
 - Сегодня: {stats['today']}
 - Просрочено: {stats['overdue']}
 
-Сегодня: {datetime.now().strftime('%d.%m.%Y')}"""
+Сегодня: {get_moscow_now().strftime('%d.%m.%Y')}"""
 
         messages = [{'role': 'system', 'content': system}]
         messages.extend(history)
@@ -546,17 +569,18 @@ def parse_ai_actions(reply, user_id):
             time_str = None
 
         # Парсим дату
+        moscow_now = get_moscow_now()
         if deadline == 'сегодня' or (deadline and 'сегодня' in deadline.lower()):
-            deadline = datetime.now().strftime('%Y-%m-%d')
+            deadline = moscow_now.strftime('%Y-%m-%d')
         elif deadline == 'завтра' or (deadline and 'завтра' in deadline.lower()):
-            deadline = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+            deadline = (moscow_now + timedelta(days=1)).strftime('%Y-%m-%d')
         elif deadline and re.match(r'\d{4}-\d{2}-\d{2}', deadline):
             pass
         elif deadline and re.match(r'\d{2}\.\d{2}', deadline):
             day, month = deadline.split('.')
-            deadline = f'{datetime.now().year}-{month}-{day}'
+            deadline = f'{moscow_now.year}-{month}-{day}'
         else:
-            deadline = datetime.now().strftime('%Y-%m-%d')
+            deadline = moscow_now.strftime('%Y-%m-%d')
 
         # Убираем время из названия задачи
         clean_title = re.sub(r'в \d{1,2}[:\.]?\d{0,2}\s*(утра|вечера|дня)?', '', title, flags=re.IGNORECASE).strip()
@@ -569,8 +593,8 @@ def parse_ai_actions(reply, user_id):
         if time_str and task_id:
             try:
                 h, m = map(int, time_str.split(':'))
-                remind_dt = datetime.now().replace(hour=h, minute=m, second=0)
-                if remind_dt < datetime.now():
+                remind_dt = moscow_now.replace(hour=h, minute=m, second=0)
+                if remind_dt < moscow_now:
                     remind_dt += timedelta(days=1)
                 add_reminder(task_id, remind_dt.strftime('%Y-%m-%d %H:%M:%S'))
             except Exception:
@@ -619,9 +643,9 @@ def handle_tasks(text, user_id):
             priority = 'low'
 
         if 'сегодня' in lower:
-            deadline = datetime.now().strftime('%Y-%m-%d')
+            deadline = get_moscow_now().strftime('%Y-%m-%d')
         elif 'завтра' in lower:
-            deadline = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+            deadline = (get_moscow_now() + timedelta(days=1)).strftime('%Y-%m-%d')
 
         clean_title = re.sub(
             r'сегодня|завтра|срочно|важно|горит|потом|не срочно',
@@ -777,7 +801,7 @@ def check_daily_report():
     """Отправляет отчёт утром (9:00) и вечером (21:00)"""
     while True:
         try:
-            now = datetime.now()
+            now = get_moscow_now()
             today = now.strftime('%Y-%m-%d')
             hour = now.hour
             minute = now.minute
@@ -803,7 +827,7 @@ def send_morning_report(user_id):
     """Утренний отчёт: что сегодня делаем"""
     stats = get_stats(user_id)
     tasks = get_tasks(user_id)
-    today_str = datetime.now().strftime('%Y-%m-%d')
+    today_str = get_moscow_now().strftime('%Y-%m-%d')
     today_tasks = [t for t in tasks if t.get('deadline') == today_str]
     overdue = [t for t in tasks if t.get('deadline') and t['deadline'] < today_str]
 
@@ -833,7 +857,7 @@ def send_morning_report(user_id):
 def send_evening_report(user_id):
     """Вечерний отчёт: итоги дня"""
     stats = get_stats(user_id)
-    today_str = datetime.now().strftime('%Y-%m-%d')
+    today_str = get_moscow_now().strftime('%Y-%m-%d')
     tasks = get_tasks(user_id)
     today_tasks = [t for t in tasks if t.get('deadline') == today_str]
     done_today = [t for t in today_tasks if t['status'] == 'done']
