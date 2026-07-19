@@ -1034,6 +1034,8 @@ setInterval(load,30000);
 </body>
 </html>'''
 
+DASHBOARD_HTML = DASHBOARD_HTML.replace('{VERSION}', VERSION).replace('{BUILD_TIME}', BUILD_TIME)
+
 class DashboardHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = urlparse(self.path).path
