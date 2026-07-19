@@ -1089,7 +1089,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 (VK_USER_ID,)
             )
             task_columns = [desc[0] for desc in cur.description]
-            tasks = [dict(zip(task_columns, row)) for row in cur.fetchall()]
+            tasks = []
+            for row in cur.fetchall():
+                t = dict(zip(task_columns, row))
+                # Конвертируем datetime в строки для JSON
+                for k, v in t.items():
+                    if v is not None and not isinstance(v, (str, int, float, bool)):
+                        t[k] = str(v)
+                tasks.append(t)
 
             cur.execute("SELECT COUNT(*) FROM tasks WHERE user_id = %s AND status = 'active'", (VK_USER_ID,))
             active = cur.fetchone()[0]
