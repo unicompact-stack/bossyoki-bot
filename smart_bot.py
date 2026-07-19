@@ -13,7 +13,7 @@ import signal
 import logging
 import threading
 import time
-import sqlite3
+import psycopg2
 import requests
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
@@ -27,10 +27,11 @@ TOKEN = os.getenv('VK_TOKEN_MESSAGES')
 GROUP_ID = int(os.getenv('VK_GROUP_ID', '73303964'))
 GITHUB_KEY = os.getenv('GITHUB_TOKEN', os.getenv('GROQ_API_KEY'))
 VK_USER_ID = int(os.getenv('VK_USER_ID', '114439622'))
+SUPABASE_URL = os.getenv('SUPABASE_URL')
+SUPABASE_KEY = os.getenv('SUPABASE_KEY')
 DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE = os.path.join(DIR, 'smart_bot.log')
 PID_FILE = os.path.join(DIR, 'smart_bot.pid')
-DB_FILE = os.path.join(DIR, 'tasks.db')
 GITHUB_REPO = 'unicompact-stack/bossyoki'
 GITHUB_FILE = 'tasks.json'
 
@@ -48,16 +49,16 @@ log = logging.getLogger('smart_bot')
 # === БД ===
 
 def get_db():
-    conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row
+    conn = psycopg2.connect(SUPABASE_KEY)
+    conn.autocommit = False
     return conn
 
 def init_db():
     conn = get_db()
-    conn.execute('PRAGMA foreign_keys = ON')
-    conn.execute('''CREATE TABLE IF NOT EXISTS tasks (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
+    cur = conn.cursor()
+    cur.execute('''CREATE TABLE IF NOT EXISTS tasks (
+        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        user_id BIGINT NOT NULL,
         title TEXT NOT NULL,
         note TEXT DEFAULT '',
         deadline TEXT,
@@ -65,25 +66,22 @@ def init_db():
         priority TEXT DEFAULT 'medium',
         category TEXT DEFAULT '',
         status TEXT DEFAULT 'active',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW(),
         completed_at TIMESTAMP
     )''')
-    conn.execute('''CREATE TABLE IF NOT EXISTS reminders (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        task_id INTEGER NOT NULL,
+    cur.execute('''CREATE TABLE IF NOT EXISTS reminders (
+        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        task_id BIGINT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
         remind_at TIMESTAMP NOT NULL,
-        sent INTEGER DEFAULT 0,
-        FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        sent INTEGER DEFAULT 0
     )''')
-    conn.execute('''CREATE TABLE IF NOT EXISTS conversations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
+    cur.execute('''CREATE TABLE IF NOT EXISTS conversations (
+        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        user_id BIGINT NOT NULL,
         role TEXT NOT NULL,
         message TEXT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP DEFAULT NOW()
     )''')
-    # Очищаем сообщения старше 30 дней
-    conn.execute("DELETE FROM conversations WHERE created_at < datetime('now', '-30 days')")
     conn.commit()
     conn.close()
 
@@ -92,23 +90,27 @@ def init_db():
 
 def save_message(user_id, role, message):
     conn = get_db()
-    conn.execute('INSERT INTO conversations (user_id, role, message) VALUES (?, ?, ?)',
-                 (user_id, role, message))
+    cur = conn.cursor()
+    cur.execute('INSERT INTO conversations (user_id, role, message) VALUES (%s, %s, %s)',
+                (user_id, role, message))
     conn.commit()
     conn.close()
 
 def get_conversation_history(user_id, limit=20):
     conn = get_db()
-    rows = conn.execute(
-        'SELECT role, message FROM conversations WHERE user_id = ? ORDER BY id DESC LIMIT ?',
+    cur = conn.cursor()
+    cur.execute(
+        'SELECT role, message FROM conversations WHERE user_id = %s ORDER BY id DESC LIMIT %s',
         (user_id, limit)
-    ).fetchall()
+    )
+    rows = cur.fetchall()
     conn.close()
-    return [{'role': r['role'], 'content': r['message']} for r in reversed(rows)]
+    return [{'role': r[0], 'content': r[1]} for r in reversed(rows)]
 
 def clear_conversation(user_id):
     conn = get_db()
-    conn.execute('DELETE FROM conversations WHERE user_id = ?', (user_id,))
+    cur = conn.cursor()
+    cur.execute('DELETE FROM conversations WHERE user_id = %s', (user_id,))
     conn.commit()
     conn.close()
 
@@ -117,18 +119,12 @@ def clear_conversation(user_id):
 
 def add_task(user_id, title, deadline=None, priority='medium', category='', note='', time=None):
     conn = get_db()
-    # Проверяем есть ли колонка time
-    try:
-        conn.execute('SELECT time FROM tasks LIMIT 1')
-    except:
-        conn.execute('ALTER TABLE tasks ADD COLUMN time TEXT DEFAULT ''')
-        conn.commit()
-
-    cur = conn.execute(
-        'INSERT INTO tasks (user_id, title, note, deadline, priority, category, time) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    cur = conn.cursor()
+    cur.execute(
+        'INSERT INTO tasks (user_id, title, note, deadline, priority, category, time) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id',
         (user_id, title, note, deadline, priority, category, time)
     )
-    task_id = cur.lastrowid
+    task_id = cur.fetchone()[0]
     conn.commit()
     conn.close()
     sync_to_github()
@@ -136,20 +132,24 @@ def add_task(user_id, title, deadline=None, priority='medium', category='', note
 
 def get_tasks(user_id, status='active'):
     conn = get_db()
-    rows = conn.execute(
-        'SELECT * FROM tasks WHERE user_id = ? AND status = ? ORDER BY '
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT * FROM tasks WHERE user_id = %s AND status = %s ORDER BY "
         "CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, deadline",
         (user_id, status)
-    ).fetchall()
+    )
+    columns = [desc[0] for desc in cur.description]
+    rows = cur.fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    return [dict(zip(columns, row)) for row in rows]
 
 def complete_task(user_id, task_id):
     conn = get_db()
+    cur = conn.cursor()
     now = datetime.now().isoformat()
-    cur = conn.execute(
-        'UPDATE tasks SET status = ?, completed_at = ? WHERE id = ? AND user_id = ?',
-        ('done', now, task_id, user_id)
+    cur.execute(
+        "UPDATE tasks SET status = 'done', completed_at = %s WHERE id = %s AND user_id = %s",
+        (now, task_id, user_id)
     )
     conn.commit()
     changed = cur.rowcount
@@ -160,7 +160,8 @@ def complete_task(user_id, task_id):
 
 def delete_task(user_id, task_id):
     conn = get_db()
-    cur = conn.execute('DELETE FROM tasks WHERE id = ? AND user_id = ?', (task_id, user_id))
+    cur = conn.cursor()
+    cur.execute('DELETE FROM tasks WHERE id = %s AND user_id = %s', (task_id, user_id))
     conn.commit()
     changed = cur.rowcount
     conn.close()
@@ -170,17 +171,23 @@ def delete_task(user_id, task_id):
 
 def get_stats(user_id):
     conn = get_db()
-    total = conn.execute('SELECT COUNT(*) FROM tasks WHERE user_id = ?', (user_id,)).fetchone()[0]
-    done = conn.execute('SELECT COUNT(*) FROM tasks WHERE user_id = ? AND status = ?', (user_id, 'done')).fetchone()[0]
-    active = conn.execute('SELECT COUNT(*) FROM tasks WHERE user_id = ? AND status = ?', (user_id, 'active')).fetchone()[0]
-    overdue = conn.execute(
-        "SELECT COUNT(*) FROM tasks WHERE user_id = ? AND status = 'active' AND deadline < date('now')",
+    cur = conn.cursor()
+    cur.execute('SELECT COUNT(*) FROM tasks WHERE user_id = %s', (user_id,))
+    total = cur.fetchone()[0]
+    cur.execute("SELECT COUNT(*) FROM tasks WHERE user_id = %s AND status = 'done'", (user_id,))
+    done = cur.fetchone()[0]
+    cur.execute("SELECT COUNT(*) FROM tasks WHERE user_id = %s AND status = 'active'", (user_id,))
+    active = cur.fetchone()[0]
+    cur.execute(
+        "SELECT COUNT(*) FROM tasks WHERE user_id = %s AND status = 'active' AND deadline < CURRENT_DATE::text",
         (user_id,)
-    ).fetchone()[0]
-    today_count = conn.execute(
-        "SELECT COUNT(*) FROM tasks WHERE user_id = ? AND status = 'active' AND deadline = date('now')",
+    )
+    overdue = cur.fetchone()[0]
+    cur.execute(
+        "SELECT COUNT(*) FROM tasks WHERE user_id = %s AND status = 'active' AND deadline = CURRENT_DATE::text",
         (user_id,)
-    ).fetchone()[0]
+    )
+    today_count = cur.fetchone()[0]
     conn.close()
     return {'total': total, 'done': done, 'active': active, 'overdue': overdue, 'today': today_count}
 
@@ -207,7 +214,10 @@ def sync_to_github(force=False):
         return
     try:
         conn = get_db()
-        rows = conn.execute('SELECT * FROM tasks WHERE user_id = ? ORDER BY id', (VK_USER_ID,)).fetchall()
+        cur = conn.cursor()
+        cur.execute('SELECT * FROM tasks WHERE user_id = %s ORDER BY id', (VK_USER_ID,))
+        columns = [desc[0] for desc in cur.description]
+        rows = cur.fetchall()
         conn.close()
 
         # Если в БД нет задач — не перезаписываем GitHub (загружаем оттуда)
@@ -217,7 +227,8 @@ def sync_to_github(force=False):
             return
 
         tasks_list = []
-        for r in rows:
+        for row in rows:
+            r = dict(zip(columns, row))
             tasks_list.append({
                 'id': str(r['id']),
                 'title': r['title'],
@@ -227,7 +238,7 @@ def sync_to_github(force=False):
                 'priority': r['priority'],
                 'category': r['category'] or '',
                 'done': r['status'] == 'done',
-                'created': r['created_at'] or ''
+                'created': str(r['created_at']) if r['created_at'] else ''
             })
 
         data = json.dumps({
@@ -285,17 +296,17 @@ def load_from_github():
             tasks = data.get('tasks', [])
 
             conn = get_db()
-            existing = {r['title'].lower() for r in conn.execute(
-                'SELECT title FROM tasks WHERE user_id = ?', (VK_USER_ID,)
-            ).fetchall()}
+            cur = conn.cursor()
+            cur.execute('SELECT title FROM tasks WHERE user_id = %s', (VK_USER_ID,))
+            existing = {row[0].lower() for row in cur.fetchall()}
 
             added = 0
             for t in tasks:
                 if t.get('done'):
                     continue
                 if t['title'].lower() not in existing:
-                    conn.execute(
-                        'INSERT INTO tasks (user_id, title, note, deadline, priority, category, time) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                    cur.execute(
+                        'INSERT INTO tasks (user_id, title, note, deadline, priority, category, time) VALUES (%s, %s, %s, %s, %s, %s, %s)',
                         (VK_USER_ID, t['title'], t.get('note', ''), t.get('date', ''), t.get('priority', 'medium'), t.get('category', ''), t.get('time', ''))
                     )
                     added += 1
@@ -314,24 +325,29 @@ def load_from_github():
 
 def add_reminder(task_id, remind_at):
     conn = get_db()
-    conn.execute('INSERT INTO reminders (task_id, remind_at) VALUES (?, ?)', (task_id, remind_at))
+    cur = conn.cursor()
+    cur.execute('INSERT INTO reminders (task_id, remind_at) VALUES (%s, %s)', (task_id, remind_at))
     conn.commit()
     conn.close()
 
 def get_pending_reminders():
     conn = get_db()
+    cur = conn.cursor()
     now = datetime.now().isoformat()
-    rows = conn.execute(
+    cur.execute(
         'SELECT r.id, r.task_id, r.remind_at, t.title, t.user_id FROM reminders r '
-        'JOIN tasks t ON r.task_id = t.id WHERE r.sent = 0 AND r.remind_at <= ?',
+        'JOIN tasks t ON r.task_id = t.id WHERE r.sent = 0 AND r.remind_at <= %s',
         (now,)
-    ).fetchall()
+    )
+    columns = [desc[0] for desc in cur.description]
+    rows = cur.fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    return [dict(zip(columns, row)) for row in rows]
 
 def mark_reminder_sent(reminder_id):
     conn = get_db()
-    conn.execute('UPDATE reminders SET sent = 1 WHERE id = ?', (reminder_id,))
+    cur = conn.cursor()
+    cur.execute('UPDATE reminders SET sent = 1 WHERE id = %s', (reminder_id,))
     conn.commit()
     conn.close()
 
@@ -668,18 +684,20 @@ def handle_reminder(text, user_id):
 
     if t in ['напоминания', 'активные напоминания']:
         conn = get_db()
-        rows = conn.execute(
+        cur = conn.cursor()
+        cur.execute(
             'SELECT r.remind_at, t.title FROM reminders r '
             'JOIN tasks t ON r.task_id = t.id '
-            'WHERE t.user_id = ? AND r.sent = 0 ORDER BY r.remind_at',
+            'WHERE t.user_id = %s AND r.sent = 0 ORDER BY r.remind_at',
             (user_id,)
-        ).fetchall()
+        )
+        rows = cur.fetchall()
         conn.close()
         if not rows:
             return 'Активных напоминаний нет.'
         lines = ['⏰ Напоминания:\n']
         for i, row in enumerate(rows, 1):
-            lines.append(f"{i}. {row['remind_at'][:16]} — {row['title']}")
+            lines.append(f"{i}. {str(row[0])[:16]} — {row[1]}")
         return '\n'.join(lines)
 
     return None
@@ -756,26 +774,25 @@ def periodic_sync():
 _report_sent_today = {}
 
 def check_daily_report():
-    """Отправляет отчёт утром (9:00-10:00) и вечером (21:00-22:00)"""
+    """Отправляет отчёт утром (9:00) и вечером (21:00)"""
     while True:
         try:
             now = datetime.now()
             today = now.strftime('%Y-%m-%d')
             hour = now.hour
+            minute = now.minute
 
-            # Утренний отчёт (окно 9:00-10:00)
+            # Утренний отчёт в 9:00 (окно 9:00-9:02)
             morning_key = f'{today}_morning'
-            if 9 <= hour < 10 and morning_key not in _report_sent_today:
+            if hour == 9 and minute < 3 and morning_key not in _report_sent_today:
                 _report_sent_today[morning_key] = True
                 send_morning_report(VK_USER_ID)
-                log.info('☀️ Утренний отчёт отправлен')
 
-            # Вечерний отчёт (окно 21:00-22:00)
+            # Вечерний отчёт в 21:00 (окно 21:00-21:02)
             evening_key = f'{today}_evening'
-            if 21 <= hour < 22 and evening_key not in _report_sent_today:
+            if hour == 21 and minute < 3 and evening_key not in _report_sent_today:
                 _report_sent_today[evening_key] = True
                 send_evening_report(VK_USER_ID)
-                log.info('🌙 Вечерний отчёт отправлен')
 
         except Exception as e:
             log.error(f'Daily report error: {e}')
@@ -941,7 +958,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 <span style="color:#888;font-size:13px">Dashboard</span>
 </div>
 <div class="container">
-<div style="background:#16213e;border-radius:8px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:8px;font-size:12px;color:#888"><div style="width:8px;height:8px;border-radius:50%;background:#4caf50"></div><span id="sync-text">Данные: SQLite (Render) + GitHub tasks.json</span></div>
+<div style="background:#16213e;border-radius:8px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:8px;font-size:12px;color:#888"><div style="width:8px;height:8px;border-radius:50%;background:#4caf50"></div><span id="sync-text">Данные: Supabase PostgreSQL</span></div>
 <div class="stats" id="stats"></div>
 <div class="section">
 <h2>Последние сообщения</h2>
@@ -1044,36 +1061,49 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def _get_api_data(self):
-        conn = sqlite3.connect(DB_FILE)
-        conn.row_factory = sqlite3.Row
+        conn = get_db()
+        cur = conn.cursor()
         try:
             msgs = []
-            for r in conn.execute(
+            cur.execute(
                 "SELECT role, message, created_at FROM conversations ORDER BY id DESC LIMIT 30"
-            ).fetchall():
-                row = dict(r)
-                t = row.get('created_at', '')
-                # SQLite хранит UTC — конвертируем в Moscow time (UTC+3)
+            )
+            columns = [desc[0] for desc in cur.description]
+            for row in cur.fetchall():
+                row_dict = dict(zip(columns, row))
+                t = str(row_dict.get('created_at', ''))
                 try:
                     from datetime import datetime as dt2
                     utc = dt2.strptime(t[:19], '%Y-%m-%d %H:%M:%S')
                     local = utc + timedelta(hours=3)
-                    row['time'] = local.strftime('%H:%M')
-                    row['date'] = local.strftime('%d.%m')
+                    row_dict['time'] = local.strftime('%H:%M')
+                    row_dict['date'] = local.strftime('%d.%m')
                 except Exception:
-                    row['time'] = t[11:16] if len(t) > 16 else t[:5]
-                    row['date'] = t[:10]
-                msgs.append(row)
+                    row_dict['time'] = t[11:16] if len(t) > 16 else t[:5]
+                    row_dict['date'] = t[:10]
+                msgs.append(row_dict)
             msgs.reverse()
-            tasks = [dict(r) for r in conn.execute(
-                "SELECT id, title, priority, deadline, time, status FROM tasks WHERE user_id = ? ORDER BY id DESC LIMIT 50",
+
+            cur.execute(
+                "SELECT id, title, priority, deadline, time, status FROM tasks WHERE user_id = %s ORDER BY id DESC LIMIT 50",
                 (VK_USER_ID,)
-            ).fetchall()]
+            )
+            task_columns = [desc[0] for desc in cur.description]
+            tasks = [dict(zip(task_columns, row)) for row in cur.fetchall()]
+
+            cur.execute("SELECT COUNT(*) FROM tasks WHERE user_id = %s AND status = 'active'", (VK_USER_ID,))
+            active = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM tasks WHERE user_id = %s AND status = 'done'", (VK_USER_ID,))
+            done = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM tasks WHERE user_id = %s AND status = 'active' AND deadline = CURRENT_DATE::text", (VK_USER_ID,))
+            today = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM tasks WHERE user_id = %s AND status = 'active' AND deadline < CURRENT_DATE::text", (VK_USER_ID,))
+            overdue = cur.fetchone()[0]
             stats = {
-                'active': conn.execute("SELECT COUNT(*) FROM tasks WHERE user_id = ? AND status = 'active'", (VK_USER_ID,)).fetchone()[0],
-                'done': conn.execute("SELECT COUNT(*) FROM tasks WHERE user_id = ? AND status = 'done'", (VK_USER_ID,)).fetchone()[0],
-                'today': conn.execute("SELECT COUNT(*) FROM tasks WHERE user_id = ? AND status = 'active' AND deadline = date('now')", (VK_USER_ID,)).fetchone()[0],
-                'overdue': conn.execute("SELECT COUNT(*) FROM tasks WHERE user_id = ? AND status = 'active' AND deadline < date('now')", (VK_USER_ID,)).fetchone()[0],
+                'active': active,
+                'done': done,
+                'today': today,
+                'overdue': overdue,
             }
         finally:
             conn.close()

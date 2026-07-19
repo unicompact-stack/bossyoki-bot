@@ -1,4 +1,5 @@
 vk_api
 requests
+apscheduler
 python-dotenv
-schedule
+psycopg2-binary
