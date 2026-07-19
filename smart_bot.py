@@ -958,7 +958,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 <span style="color:#888;font-size:13px">Dashboard</span>
 </div>
 <div class="container">
-<div style="background:#16213e;border-radius:8px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:8px;font-size:12px;color:#888"><div style="width:8px;height:8px;border-radius:50%;background:#4caf50"></div><span id="sync-text">Данные: SQLite (Render) + GitHub tasks.json</span></div>
+<div style="background:#16213e;border-radius:8px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:8px;font-size:12px;color:#888"><div style="width:8px;height:8px;border-radius:50%;background:#4caf50"></div><span id="sync-text">Данные: Supabase PostgreSQL</span></div>
 <div class="stats" id="stats"></div>
 <div class="section">
 <h2>Последние сообщения</h2>
