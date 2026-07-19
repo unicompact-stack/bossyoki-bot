@@ -1072,6 +1072,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             for row in cur.fetchall():
                 row_dict = dict(zip(columns, row))
                 t = str(row_dict.get('created_at', ''))
+                row_dict['created_at'] = t  # datetime → str для JSON
                 try:
                     from datetime import datetime as dt2
                     utc = dt2.strptime(t[:19], '%Y-%m-%d %H:%M:%S')
