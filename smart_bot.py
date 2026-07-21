@@ -143,79 +143,113 @@ def clear_conversation(user_id):
     conn.close()
 
 
-# === MiMo Tasks (задачи для MiMo Code) ===
+# === MiMo Tasks (задачи для MiMo Code — через GitHub) ===
+
+import base64
+
+MIMO_GITHUB_REPO = 'unicompact-stack/bossyoki'
+MIMO_GITHUB_FILE = 'mimo_tasks.json'
+GITHUB_API = 'https://api.github.com'
+
+def load_mimo_tasks():
+    """Читает задачи из GitHub"""
+    if not GITHUB_KEY:
+        return []
+    url = f"{GITHUB_API}/repos/{MIMO_GITHUB_REPO}/contents/{MIMO_GITHUB_FILE}"
+    headers = {"Authorization": f"token {GITHUB_KEY}", "Accept": "application/vnd.github.v3+json"}
+    try:
+        r = requests.get(url, headers=headers, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            content = base64.b64decode(data['content']).decode('utf-8')
+            return json.loads(content), data.get('sha', '')
+        elif r.status_code == 404:
+            return [], None
+        else:
+            log.error(f'GitHub read error: {r.status_code}')
+            return [], None
+    except Exception as e:
+        log.error(f'GitHub read error: {e}')
+        return [], None
+
+def save_mimo_tasks(tasks, sha=None):
+    """Сохраняет задачи на GitHub"""
+    if not GITHUB_KEY:
+        return False
+    url = f"{GITHUB_API}/repos/{MIMO_GITHUB_REPO}/contents/{MIMO_GITHUB_FILE}"
+    headers = {"Authorization": f"token {GITHUB_KEY}", "Accept": "application/vnd.github.v3+json"}
+    content = json.dumps(tasks, ensure_ascii=False, indent=2)
+    encoded = base64.b64encode(content.encode('utf-8')).decode('utf-8')
+    data = {"message": f"Update mimo_tasks ({get_moscow_now().strftime('%H:%M')})", "content": encoded}
+    if sha:
+        data["sha"] = sha
+    try:
+        r = requests.put(url, headers=headers, json=data, timeout=10)
+        return r.status_code in (200, 201)
+    except Exception as e:
+        log.error(f'GitHub save error: {e}')
+        return False
 
 def add_mimo_task(user_id, text):
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(
-        'INSERT INTO mimo_tasks (user_id, text) VALUES (%s, %s) RETURNING id',
-        (user_id, text)
-    )
-    task_id = cur.fetchone()[0]
-    conn.commit()
-    conn.close()
+    tasks, sha = load_mimo_tasks()
+    if not isinstance(tasks, list):
+        tasks = []
+    task_id = max([t.get('id', 0) for t in tasks], default=0) + 1
+    tasks.append({
+        "id": task_id,
+        "text": text,
+        "user_id": user_id,
+        "status": "pending",
+        "created": get_moscow_now().isoformat()
+    })
+    save_mimo_tasks(tasks, sha)
     return task_id
 
 def get_pending_mimo_tasks():
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(
-        "SELECT id, user_id, text, created_at FROM mimo_tasks WHERE status = 'pending' ORDER BY id"
-    )
-    columns = [desc[0] for desc in cur.description]
-    rows = cur.fetchall()
-    conn.close()
-    return [dict(zip(columns, row)) for row in rows]
+    tasks, _ = load_mimo_tasks()
+    if not isinstance(tasks, list):
+        return []
+    return [t for t in tasks if t.get('status') == 'pending']
 
 def get_all_mimo_tasks(user_id=None):
-    conn = get_db()
-    cur = conn.cursor()
+    tasks, _ = load_mimo_tasks()
+    if not isinstance(tasks, list):
+        return []
     if user_id:
-        cur.execute(
-            "SELECT id, text, status, result, created_at, completed_at FROM mimo_tasks WHERE user_id = %s ORDER BY id DESC LIMIT 10",
-            (user_id,)
-        )
-    else:
-        cur.execute(
-            "SELECT id, user_id, text, status, result, created_at, completed_at FROM mimo_tasks ORDER BY id DESC LIMIT 10"
-        )
-    columns = [desc[0] for desc in cur.description]
-    rows = cur.fetchall()
-    conn.close()
-    return [dict(zip(columns, row)) for row in rows]
+        tasks = [t for t in tasks if t.get('user_id') == user_id]
+    return sorted(tasks, key=lambda x: x.get('id', 0), reverse=True)[:10]
 
 def complete_mimo_task(task_id, result=''):
-    conn = get_db()
-    cur = conn.cursor()
-    now = get_moscow_now().isoformat()
-    cur.execute(
-        "UPDATE mimo_tasks SET status = 'done', result = %s, completed_at = %s WHERE id = %s",
-        (result, now, task_id)
-    )
-    conn.commit()
-    changed = cur.rowcount
-    conn.close()
-    return changed > 0
+    tasks, sha = load_mimo_tasks()
+    if not isinstance(tasks, list):
+        return False
+    for t in tasks:
+        if t.get('id') == task_id:
+            t['status'] = 'done'
+            t['result'] = result
+            t['completed_at'] = get_moscow_now().isoformat()
+            break
+    return save_mimo_tasks(tasks, sha)
 
 def error_mimo_task(task_id, result=''):
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(
-        "UPDATE mimo_tasks SET status = 'error', result = %s WHERE id = %s",
-        (result, task_id)
-    )
-    conn.commit()
-    conn.close()
+    tasks, sha = load_mimo_tasks()
+    if not isinstance(tasks, list):
+        return False
+    for t in tasks:
+        if t.get('id') == task_id:
+            t['status'] = 'error'
+            t['result'] = result
+            break
+    return save_mimo_tasks(tasks, sha)
 
 def clear_done_mimo_tasks():
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute("DELETE FROM mimo_tasks WHERE status IN ('done', 'error')")
-    deleted = cur.rowcount
-    conn.commit()
-    conn.close()
-    return deleted
+    tasks, sha = load_mimo_tasks()
+    if not isinstance(tasks, list):
+        return 0
+    before = len(tasks)
+    tasks = [t for t in tasks if t.get('status') not in ('done', 'error')]
+    save_mimo_tasks(tasks, sha)
+    return before - len(tasks)
 
 MIMO_CONFIG_FILE = os.path.join(DIR, 'mimo_config.json')
 
