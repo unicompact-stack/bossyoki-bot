@@ -62,7 +62,7 @@ logging.basicConfig(
 log = logging.getLogger('smart_bot')
 
 VERSION = '2.2.0'
-BUILD_TIME = get_moscow_now().strftime('%d.%m.%Y %H:%M')
+BUILD_TIME = '21.07.2026 18:40'
 
 
 # === БД ===
