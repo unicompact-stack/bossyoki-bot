@@ -257,7 +257,7 @@ def load_mimo_config():
     if os.path.exists(MIMO_CONFIG_FILE):
         with open(MIMO_CONFIG_FILE, 'r') as f:
             return json.load(f)
-    return {"enabled": True}
+    return {"enabled": False}
 
 def save_mimo_config(config):
     with open(MIMO_CONFIG_FILE, 'w') as f:
