@@ -217,8 +217,40 @@ def clear_done_mimo_tasks():
     conn.close()
     return deleted
 
+MIMO_CONFIG_FILE = os.path.join(DIR, 'mimo_config.json')
+
+def load_mimo_config():
+    if os.path.exists(MIMO_CONFIG_FILE):
+        with open(MIMO_CONFIG_FILE, 'r') as f:
+            return json.load(f)
+    return {"enabled": True}
+
+def save_mimo_config(config):
+    with open(MIMO_CONFIG_FILE, 'w') as f:
+        json.dump(config, f)
+
 def handle_mimo(text, user_id):
     t = text.lower().strip()
+    config = load_mimo_config()
+
+    # Включение/выключение MiMo режима
+    if t in ['мимо вкл', 'mimo on', 'мимо включить']:
+        config['enabled'] = True
+        save_mimo_config(config)
+        return '🟢 MiMo Code включён! Команды мимо активны.'
+
+    if t in ['мимо выкл', 'mimo off', 'мимо отключить']:
+        config['enabled'] = False
+        save_mimo_config(config)
+        return '🔴 MiMo Code выключен. Бот работает как обычный задачник.'
+
+    if t in ['мимо режим', 'mimo режим']:
+        status = '🟢 Включён' if config.get('enabled', True) else '🔴 Выключен'
+        return f'Режим MiMo Code: {status}\n\nКоманды:\n• мимо вкл — включить\n• мимо выкл — выключить'
+
+    # Если MiMo выключен — пропускаем обработку
+    if not config.get('enabled', True):
+        return None
 
     # Отправить задачу в MiMo Code
     if t.startswith('мимо ') or t.startswith('mimo '):
@@ -865,7 +897,8 @@ def handle_help():
         '• мимо [задача] — отправить задачу\n'
         '• мимо задачи — очередь задач\n'
         '• мимо статус — сколько в очереди\n'
-        '• мимо очистить — удалить завершённые\n\n'
+        '• мимо очистить — удалить завершённые\n'
+        '• мимо вкл / выкл — включить/выключить\n\n'
         '🤖 AI:\n'
         '• Любой вопрос — ответ от AI\n'
         '• Помощь — этот список'
