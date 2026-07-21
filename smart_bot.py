@@ -1067,18 +1067,25 @@ def handle_message(event, api):
     reply = None
     config = load_mimo_config()
 
-    # Если MiMo режим включён — обрабатываем ТОЛЬКО команды мимо
+    # Если MiMo режим включён
     if config.get('enabled', True):
-        # Сначала проверяем команды мимо (вкл/выкл/режим)
-        mimo_toggle = handle_mimo(text, user_id)
-        if mimo_toggle:
-            reply = mimo_toggle
-        # Если сообщение начинается с "мимо" — только mimo обработка
-        elif text.lower().startswith('мимо ') or text.lower().startswith('mimo '):
+        t = text.lower().strip()
+
+        # Команды управления (всегда работают)
+        if t in ['мимо вкл', 'mimo on', 'мимо выключить', 'мимо включить']:
             reply = handle_mimo(text, user_id)
-        # Иначе — тихо пропускаем (Босс Йоки не отвечает)
+        elif t in ['мимо выкл', 'mimo off', 'мимо отключить']:
+            reply = handle_mimo(text, user_id)
+        elif t in ['мимо режим', 'mimo режим']:
+            reply = handle_mimo(text, user_id)
+        elif t in ['мимо задачи', 'mimo задачи', 'очередь мимо', 'мимо статус', 'mimo статус']:
+            reply = handle_mimo(text, user_id)
+        elif t in ['мимо очистить', 'mimo очистить', 'мимо clear']:
+            reply = handle_mimo(text, user_id)
+        # ЛЮБОЕ ДРУГОЕ СООБЩЕНИЕ → задача для MiMo Code
         else:
-            return
+            task_id = add_mimo_task(user_id, text)
+            reply = f'✅ Принято! Задача #{task_id} ушла в MiMo Code.\n\n«{text[:80]}»\n\n⏳ Результат пришлётся через ~5 мин.'
     else:
         # MiMo выключен — работаем как обычный бот
         if text.lower() in ['помощь', 'помоги', '!помощь', 'команды', 'help']:
