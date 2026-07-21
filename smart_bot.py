@@ -61,7 +61,7 @@ logging.basicConfig(
 )
 log = logging.getLogger('smart_bot')
 
-VERSION = '2.1.0'
+VERSION = '2.2.0'
 BUILD_TIME = get_moscow_now().strftime('%d.%m.%Y %H:%M')
 
 
@@ -101,6 +101,15 @@ def init_db():
         message TEXT NOT NULL,
         created_at TIMESTAMP DEFAULT NOW()
     )''')
+    cur.execute('''CREATE TABLE IF NOT EXISTS mimo_tasks (
+        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        user_id BIGINT NOT NULL,
+        text TEXT NOT NULL,
+        status TEXT DEFAULT 'pending',
+        result TEXT DEFAULT '',
+        created_at TIMESTAMP DEFAULT NOW(),
+        completed_at TIMESTAMP
+    )''')
     conn.commit()
     conn.close()
 
@@ -132,6 +141,116 @@ def clear_conversation(user_id):
     cur.execute('DELETE FROM conversations WHERE user_id = %s', (user_id,))
     conn.commit()
     conn.close()
+
+
+# === MiMo Tasks (задачи для MiMo Code) ===
+
+def add_mimo_task(user_id, text):
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        'INSERT INTO mimo_tasks (user_id, text) VALUES (%s, %s) RETURNING id',
+        (user_id, text)
+    )
+    task_id = cur.fetchone()[0]
+    conn.commit()
+    conn.close()
+    return task_id
+
+def get_pending_mimo_tasks():
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT id, user_id, text, created_at FROM mimo_tasks WHERE status = 'pending' ORDER BY id"
+    )
+    columns = [desc[0] for desc in cur.description]
+    rows = cur.fetchall()
+    conn.close()
+    return [dict(zip(columns, row)) for row in rows]
+
+def get_all_mimo_tasks(user_id=None):
+    conn = get_db()
+    cur = conn.cursor()
+    if user_id:
+        cur.execute(
+            "SELECT id, text, status, result, created_at, completed_at FROM mimo_tasks WHERE user_id = %s ORDER BY id DESC LIMIT 10",
+            (user_id,)
+        )
+    else:
+        cur.execute(
+            "SELECT id, user_id, text, status, result, created_at, completed_at FROM mimo_tasks ORDER BY id DESC LIMIT 10"
+        )
+    columns = [desc[0] for desc in cur.description]
+    rows = cur.fetchall()
+    conn.close()
+    return [dict(zip(columns, row)) for row in rows]
+
+def complete_mimo_task(task_id, result=''):
+    conn = get_db()
+    cur = conn.cursor()
+    now = get_moscow_now().isoformat()
+    cur.execute(
+        "UPDATE mimo_tasks SET status = 'done', result = %s, completed_at = %s WHERE id = %s",
+        (result, now, task_id)
+    )
+    conn.commit()
+    changed = cur.rowcount
+    conn.close()
+    return changed > 0
+
+def error_mimo_task(task_id, result=''):
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE mimo_tasks SET status = 'error', result = %s WHERE id = %s",
+        (result, task_id)
+    )
+    conn.commit()
+    conn.close()
+
+def clear_done_mimo_tasks():
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM mimo_tasks WHERE status IN ('done', 'error')")
+    deleted = cur.rowcount
+    conn.commit()
+    conn.close()
+    return deleted
+
+def handle_mimo(text, user_id):
+    t = text.lower().strip()
+
+    # Отправить задачу в MiMo Code
+    if t.startswith('мимо ') or t.startswith('mimo '):
+        task_text = text.split(' ', 1)[1] if ' ' in text else ''
+        if not task_text:
+            return 'Укажи текст задачи.\nПример: мимо сделай лендинг'
+        task_id = add_mimo_task(user_id, task_text)
+        return f'✅ Задача #{task_id} отправлена в MiMo Code:\n«{task_text}»\n\nСтатус: в очереди'
+
+    # Показать очередь
+    if t in ['мимо задачи', 'mimo задачи', 'очередь мимо']:
+        tasks = get_all_mimo_tasks(user_id)
+        if not tasks:
+            return 'Очередь задач MiMo Code пуста.'
+        status_icons = {'pending': '⏳', 'done': '✅', 'error': '❌', 'processing': '⚙️'}
+        lines = ['🤖 Очередь MiMo Code:\n']
+        for task in tasks:
+            icon = status_icons.get(task['status'], '❓')
+            lines.append(f"#{task['id']} {icon} {task['text'][:50]}")
+        return '\n'.join(lines)
+
+    # Очистить выполненные
+    if t in ['мимо очистить', 'mimo очистить', 'мимо clear']:
+        deleted = clear_done_mimo_tasks()
+        return f'🗑 Удалено {deleted} завершённых задач.'
+
+    # Статус
+    if t in ['мимо статус', 'mimo статус']:
+        pending = len(get_pending_mimo_tasks())
+        return f'📊 В очереди: {pending} задач(а)'
+
+    return None
 
 
 # === Задачи ===
@@ -742,6 +861,11 @@ def handle_help():
         '• напомни через 30 минут [текст]\n'
         '• напомни завтра 10:00 [текст]\n'
         '• напоминания — список\n\n'
+        '🤖 MiMo Code:\n'
+        '• мимо [задача] — отправить задачу\n'
+        '• мимо задачи — очередь задач\n'
+        '• мимо статус — сколько в очереди\n'
+        '• мимо очистить — удалить завершённые\n\n'
         '🤖 AI:\n'
         '• Любой вопрос — ответ от AI\n'
         '• Помощь — этот список'
@@ -916,6 +1040,8 @@ def handle_message(event, api):
         reply = handle_tasks(text, user_id)
     if not reply:
         reply = handle_reminder(text, user_id)
+    if not reply:
+        reply = handle_mimo(text, user_id)
 
     # AI (если не распознана команда)
     if not reply:
