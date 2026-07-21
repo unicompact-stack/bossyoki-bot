@@ -233,22 +233,22 @@ def handle_mimo(text, user_id):
     t = text.lower().strip()
     config = load_mimo_config()
 
-    # Включение/выключение MiMo режима
+    # Включение/выключение MiMo режима — ВСЕГДА работают
     if t in ['мимо вкл', 'mimo on', 'мимо включить']:
         config['enabled'] = True
         save_mimo_config(config)
-        return '🟢 MiMo Code включён! Команды мимо активны.'
+        return '🟢 MiMo Code включён!\n\nТеперь пиши задачи через "мимо [задача]".\nБосс Йоки молчит — работает только MiMo.'
 
     if t in ['мимо выкл', 'mimo off', 'мимо отключить']:
         config['enabled'] = False
         save_mimo_config(config)
-        return '🔴 MiMo Code выключен. Бот работает как обычный задачник.'
+        return '🔴 MiMo Code выключен.\n\nБосс Йоки снова работает! Пиши как обычно.'
 
     if t in ['мимо режим', 'mimo режим']:
         status = '🟢 Включён' if config.get('enabled', True) else '🔴 Выключен'
-        return f'Режим MiMo Code: {status}\n\nКоманды:\n• мимо вкл — включить\n• мимо выкл — выключить'
+        return f'Режим MiMo Code: {status}\n\nКоманды:\n• мимо вкл — включить (Босс Йоки молчит)\n• мимо выкл — выключить (Босс Йоки работает)'
 
-    # Если MiMo выключен — пропускаем обработку
+    # Если MiMo выключен — пропускаем обработку задач
     if not config.get('enabled', True):
         return None
 
@@ -1065,23 +1065,37 @@ def handle_message(event, api):
     save_message(user_id, 'user', text)
 
     reply = None
+    config = load_mimo_config()
 
-    # Команды
-    if text.lower() in ['помощь', 'помоги', '!помощь', 'команды', 'help']:
-        reply = handle_help()
-    if not reply:
-        reply = handle_tasks(text, user_id)
-    if not reply:
-        reply = handle_reminder(text, user_id)
-    if not reply:
-        reply = handle_mimo(text, user_id)
+    # Если MiMo режим включён — обрабатываем ТОЛЬКО команды мимо
+    if config.get('enabled', True):
+        # Сначала проверяем команды мимо (вкл/выкл/режим)
+        mimo_toggle = handle_mimo(text, user_id)
+        if mimo_toggle:
+            reply = mimo_toggle
+        # Если сообщение начинается с "мимо" — только mimo обработка
+        elif text.lower().startswith('мимо ') or text.lower().startswith('mimo '):
+            reply = handle_mimo(text, user_id)
+        # Иначе — тихо пропускаем (Босс Йоки не отвечает)
+        else:
+            return
+    else:
+        # MiMo выключен — работаем как обычный бот
+        if text.lower() in ['помощь', 'помоги', '!помощь', 'команды', 'help']:
+            reply = handle_help()
+        if not reply:
+            reply = handle_tasks(text, user_id)
+        if not reply:
+            reply = handle_reminder(text, user_id)
+        if not reply:
+            reply = handle_mimo(text, user_id)
 
-    # AI (если не распознана команда)
-    if not reply:
-        reply = ask_ai(text, user_id)
+        # AI (если не распознана команда)
+        if not reply:
+            reply = ask_ai(text, user_id)
 
-    if not reply:
-        reply = 'Не понял. Напиши "помощь" для списка команд.'
+        if not reply:
+            reply = 'Не понял. Напиши "помощь" для списка команд.'
 
     # Сохраняем ответ бота
     save_message(user_id, 'assistant', reply)
