@@ -61,8 +61,8 @@ logging.basicConfig(
 )
 log = logging.getLogger('smart_bot')
 
-VERSION = '2.2.0'
-BUILD_TIME = '21.07.2026 18:40'
+VERSION = '2.3.0'
+BUILD_TIME = '04.08.2026 22:15'
 
 
 # === БД ===
@@ -110,6 +110,8 @@ def init_db():
         created_at TIMESTAMP DEFAULT NOW(),
         completed_at TIMESTAMP
     )''')
+    # Таблица заказов КФХ Кенеш (создаётся на сайте) — гарантируем колонку для отслеживания уведомлений
+    cur.execute('ALTER TABLE kenesh_orders ADD COLUMN IF NOT EXISTS notified BOOLEAN DEFAULT FALSE')
     conn.commit()
     conn.close()
 
@@ -615,15 +617,15 @@ def parse_reminder_time(text):
 
 # === AI ===
 
-SYSTEM_PROMPT = """Ты — «Старший Партнёр» (Managing Partner) венчурного фонда, который лично отвечает за портфельные компании. У тебя репутация жёсткого, но справедливого наставника. Ты ненавидишь пустую болтовню, но обожаешь, когда кто-то начинает действовать. Твоя главная цель — запустить двигатель пользователя и не давать ему глохнуть.
+SYSTEM_PROMPT = """Ты — BossYoki, живой и полезный помощник по задачам. Твоя цель — не просто отвечать, а помогать человеку быстро доводить дела до результата. Ты помнишь контекст, предлагаешь следующий шаг и не перегружаешь пустой болтовнёй.
 
 СТИЛЬ ОБЩЕНИЯ:
-- Деловой, короткий, без эмодзи и смайлов.
-- Похвала = сухое «Принято», «Годится» или «Ты жив, и это уже прогресс».
-- Критика = холодный факт. Цифры и время: «Ты потратил на это 2 дня, хотя я просил 4 часа. Почему?»
-- Обращайся на «Ты».
-- Максимум 3-5 предложений в ответе.
-- Каждое сообщение заканчивай вопросом, на который пользователь обязан ответить действием или конкретным временем.
+- Дружелюбно, коротко и по делу.
+- Если есть польза — предлагай следующий шаг.
+- Если не хватает данных — задай один точный вопрос.
+- Обращайся на «ты».
+- Максимум 3-5 предложений.
+- Не пиши воду и не делай вид, что помог, если не помог.
 
 ТЫ УМЕЕШЬ:
 
@@ -647,15 +649,16 @@ SYSTEM_PROMPT = """Ты — «Старший Партнёр» (Managing Partner)
    - ВСЕГДА указывай время в [ADD] когда просят напомнить!
 
 5. ПРОВЕРКА ЗАДАЧ:
-   - Если задача не выполнена — требуй письменный анализ причины. Ужесточай дедлайн на сегодня, добавляй +1 задачу как штраф.
-   - Если задача выполнена — сухо констатируй: «Ок, актив завершен» и переходи к следующему.
+   - Если задача не выполнена — попроси коротко назвать причину и предложи один конкретный следующий шаг.
+   - Если задача выполнена — коротко подтверди и предложи следующую по приоритету.
 
 6. ПОСТАНОВКА ЗАДАЧ:
-   - Никогда не спрашивай «Что будешь делать?». Говори: «Судя по прогрессу, твой следующий шаг — [твоё предложение]. Согласен?»
+   - Если задача размытая — уточни её до конкретного действия, срока и результата.
+   - Предлагай следующий полезный шаг только если он реально помогает.
    - Используй правило «3 + 1»: три текущие задачи на день + одна главная цель.
 
 7. АНАЛИЗ:
-   - Раз в 3-4 сообщения делай «срез»: «Смотри, за последние 3 дня ты сделал X. Слабая зона — Y. Рекомендую выделить на Y в 2 раза больше времени завтра.»
+   - Раз в несколько сообщений делай короткий срез: что сделано, что мешает, что делать дальше.
 
 8. ПОНИМАНИЕ ВРЕМЕНИ:
    - "в 9 утра" = 09:00
@@ -670,6 +673,7 @@ SYSTEM_PROMPT = """Ты — «Старший Партнёр» (Managing Partner)
 - Если пользователь пишет что-то абстрактное («надо бы заняться...») — обрываешь: «Стоп. Конкретизируй. Что именно? Когда?»
 - Не даёшь длинных лекций.
 - КРИТИЧЕСКИ ВАЖНО: Когда пользователь просит добавить задачу, напомнить, или говорит что-то вроде "напомни", "добавь", "поставь задачу" — ТЫ ОБЯЗАН ответить [ADD: ...]. НИКОГДА не отвечай просто "Хорошо, добавлю" без [ADD: ...]. Формат: [ADD: название, дата, приоритет, время]
+- Если задачу можно превратить в понятную следующую действие — сделай это.
 
 ВАЖНО: Всегда отвечай на русском."""
 
@@ -1096,6 +1100,71 @@ def send_evening_report(user_id):
     log.info('🌙 Вечерний отчёт отправлен')
 
 
+# === Уведомления о заказах КФХ Кенеш ===
+
+def check_dairy_orders():
+    """Проверяет новые заказы КФХ Кенеш в Supabase и шлёт уведомления в VK"""
+    while True:
+        conn = None
+        try:
+            conn = get_db()
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT id, items, total, address, phone, time, created_at FROM kenesh_orders "
+                "WHERE status = 'new' AND notified = FALSE ORDER BY id ASC LIMIT 5"
+            )
+            columns = [desc[0] for desc in cur.description]
+            rows = cur.fetchall()
+
+            if rows:
+                log.info(f'🧀 Найдено {len(rows)} новых заказов КФХ Кенеш')
+            for row in rows:
+                order = dict(zip(columns, row))
+
+                # Парсим состав заказа
+                items = order['items']
+                if isinstance(items, str):
+                    try:
+                        items = json.loads(items)
+                    except Exception:
+                        items = []
+
+                lines = ['🧀🛒 НОВЫЙ ЗАКАЗ!', '=' * 22]
+                if isinstance(items, list):
+                    for it in items:
+                        if isinstance(it, dict):
+                            name = it.get('name', '?')
+                            qty = it.get('qty', 1)
+                            price = it.get('price', 0)
+                            lines.append(f'• {name} — {qty} шт. × {price}₽')
+                        else:
+                            lines.append(f'• {it}')
+                else:
+                    lines.append(str(items))
+                lines.append(f'💰 Итого: {order["total"]} ₽')
+                lines.append(f'📍 Адрес: {order["address"]}')
+                lines.append(f'📞 Телефон: {order["phone"]}')
+                lines.append(f'🕐 Время: {order["time"]}')
+                if order.get('created_at'):
+                    lines.append(f'📅 Создан: {str(order["created_at"])[:19]}')
+                lines.append('=' * 22)
+                lines.append('☑️ Админка: https://kenesh-farm.vercel.app/#admin')
+
+                msg = '\n'.join(lines)
+                send_vk_message(VK_USER_ID, msg)
+
+                # Помечаем заказ как уведомлённый
+                cur.execute('UPDATE kenesh_orders SET notified = TRUE WHERE id = %s', (order['id'],))
+                conn.commit()
+                log.info(f'✅ Уведомление о заказе #{order["id"]} отправлено')
+        except Exception as e:
+            log.error(f'Dairy orders check error: {e}')
+        finally:
+            if conn:
+                conn.close()
+        time.sleep(30)
+
+
 # === Обработка сообщений ===
 
 def handle_message(event, api):
@@ -1432,6 +1501,8 @@ def main():
     threading.Thread(target=check_reminders, daemon=True).start()
     threading.Thread(target=periodic_sync, daemon=True).start()
     threading.Thread(target=check_daily_report, daemon=True).start()
+    threading.Thread(target=check_dairy_orders, daemon=True).start()
+    log.info('🧀 Проверка заказов КФХ Кенеш запущена')
 
     for event in longpoll.listen():
         if event.type == VkBotEventType.MESSAGE_NEW:
