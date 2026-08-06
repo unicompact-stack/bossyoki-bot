@@ -1459,6 +1459,7 @@ def start_health_server():
 
 def main():
     global vk_session_ref
+    global _github_loaded
 
     def stop(sig, frame):
         log.info('Остановлен.')
@@ -1481,7 +1482,7 @@ def main():
 
     vk_session = vk_api.VkApi(token=TOKEN)
     vk_session_ref = vk_session
-    longpoll = VkBotLongPoll(vk_session, GROUP_ID)
+    longpoll = VkBotLongPoll(vk_session, GROUP_ID, wait=45)
 
     log.info(f'🚀 Бот запущен! Группа: {GROUP_ID}')
 
@@ -1504,16 +1505,27 @@ def main():
     threading.Thread(target=check_dairy_orders, daemon=True).start()
     log.info('🧀 Проверка заказов КФХ Кенеш запущена')
 
-    for event in longpoll.listen():
-        if event.type == VkBotEventType.MESSAGE_NEW:
-            text = event.obj.message.get('text', '').strip()
-            user_id = event.obj.message['from_id']
+    # Защита от сетевых ошибок VK — если LongPoll упал, перезапускаем бота
+    while True:
+        try:
+            for event in longpoll.listen():
+                if event.type == VkBotEventType.MESSAGE_NEW:
+                    text = event.obj.message.get('text', '').strip()
+                    user_id = event.obj.message['from_id']
 
-            if not text:
-                continue
+                    if not text:
+                        continue
 
-            log.info(f'← {user_id}: {text}')
-            handle_message(event, vk_session.get_api())
+                    log.info(f'← {user_id}: {text}')
+                    handle_message(event, vk_session.get_api())
+        except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError) as e:
+            log.error(f'🔌 Сетевая ошибка VK: {e} — перезапускаю LongPoll через 5 сек')
+            time.sleep(5)
+            longpoll = VkBotLongPoll(vk_session, GROUP_ID, wait=45)
+        except Exception as e:
+            log.error(f'⚠️ Ошибка LongPoll: {e} — перезапускаю через 5 сек')
+            time.sleep(5)
+            longpoll = VkBotLongPoll(vk_session, GROUP_ID, wait=45)
 
 
 if __name__ == '__main__':
