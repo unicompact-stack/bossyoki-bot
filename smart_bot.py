@@ -28,6 +28,7 @@ TOKEN = os.getenv('VK_TOKEN_MESSAGES')
 GROUP_ID = int(os.getenv('VK_GROUP_ID', '73303964'))
 GITHUB_KEY = os.getenv('GITHUB_TOKEN', os.getenv('GROQ_API_KEY'))
 GROQ_API_KEY = os.getenv('GROQ_API_KEY')
+OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')
 VK_USER_ID = int(os.getenv('VK_USER_ID', '114439622'))
 SUPABASE_URL = os.getenv('SUPABASE_URL')
 SUPABASE_KEY = os.getenv('SUPABASE_KEY')
@@ -704,7 +705,7 @@ def get_tasks_context(user_id):
     return '\n'.join(lines)
 
 def ask_ai(text, user_id):
-    if not GITHUB_KEY and not GROQ_API_KEY:
+    if not GITHUB_KEY and not GROQ_API_KEY and not OPENROUTER_API_KEY:
         return None
     try:
         context = get_tasks_context(user_id)
@@ -729,8 +730,29 @@ def ask_ai(text, user_id):
         # Обязательно передаём текущее сообщение пользователя!
         messages.append({'role': 'user', 'content': text})
 
-        # Основной провайдер — Groq (рабочий, ключ проверен)
-        if GROQ_API_KEY:
+        # Основной провайдер — OpenRouter (рабочий, ключ проверен)
+        if OPENROUTER_API_KEY:
+            r = requests.post(
+                'https://openrouter.ai/api/v1/chat/completions',
+                headers={
+                    'Authorization': f'Bearer {OPENROUTER_API_KEY}',
+                    'Content-Type': 'application/json'
+                },
+                json={
+                    'model': 'openai/gpt-4o-mini',
+                    'messages': messages,
+                    'max_tokens': 500,
+                    'temperature': 0.7
+                },
+                timeout=20
+            )
+            data = r.json()
+            if r.status_code != 200 or 'choices' not in data:
+                log.error(f'GROQ AI error: {r.status_code} — {str(data)[:300]}')
+                return None
+            reply = data['choices'][0]['message']['content']
+        elif GROQ_API_KEY:
+            # Запасной вариант — Groq
             r = requests.post(
                 'https://api.groq.com/openai/v1/chat/completions',
                 headers={
@@ -751,7 +773,7 @@ def ask_ai(text, user_id):
                 return None
             reply = data['choices'][0]['message']['content']
         else:
-            # Запасной вариант — GitHub Models (может быть недоступен)
+            # Третий запасной вариант — GitHub Models (может быть недоступен)
             r = requests.post(
                 'https://models.inference.ai.azure.com/chat/completions',
                 headers={
