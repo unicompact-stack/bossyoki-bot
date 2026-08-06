@@ -1180,47 +1180,39 @@ def handle_message(event, api):
     save_message(user_id, 'user', text)
 
     reply = None
-    config = load_mimo_config()
+    t = text.lower().strip()
 
-    # Если MiMo режим включён
-    if config.get('enabled', True):
-        t = text.lower().strip()
+    # MiMo-команды работают всегда (перехват свободных сообщений убран —
+    # иначе бот отвечает шаблоном вместо AI)
+    if t in ['мимо вкл', 'mimo on', 'мимо выключить', 'мимо включить',
+             'мимо выкл', 'mimo off', 'мимо отключить',
+             'мимо режим', 'mimo режим',
+             'мимо задачи', 'mimo задачи', 'очередь мимо', 'мимо статус', 'mimo статус',
+             'мимо очистить', 'mimo очистить', 'мимо clear']:
+        reply = handle_mimo(text, user_id)
+    elif t.startswith('мимо ') or t.startswith('mimo '):
+        reply = handle_mimo(text, user_id)
 
-        # Команды управления (всегда работают)
-        if t in ['мимо вкл', 'mimo on', 'мимо выключить', 'мимо включить']:
-            reply = handle_mimo(text, user_id)
-        elif t in ['мимо выкл', 'mimo off', 'мимо отключить']:
-            reply = handle_mimo(text, user_id)
-        elif t in ['мимо режим', 'mimo режим']:
-            reply = handle_mimo(text, user_id)
-        elif t in ['мимо задачи', 'mimo задачи', 'очередь мимо', 'мимо статус', 'mimo статус']:
-            reply = handle_mimo(text, user_id)
-        elif t in ['мимо очистить', 'mimo очистить', 'мимо clear']:
-            reply = handle_mimo(text, user_id)
-        # ЛЮБОЕ ДРУГОЕ СООБЩЕНИЕ → задача для MiMo Code
-        else:
-            task_id = add_mimo_task(user_id, text)
-            reply = f'✅ Принято! Задача #{task_id} ушла в MiMo Code.\n\n«{text[:80]}»\n\n⏳ Результат пришлётся через ~5 мин.'
-    else:
-        # MiMo выключен — работаем как обычный бот
-        # Сначала «живой» AI: понимает естественный язык, сам создаёт задачи,
-        # отмечает выполненные, удаляет, напоминает. Команды — запасной вариант.
+    # «Живой» AI: понимает естественный язык, сам создаёт задачи,
+    # отмечает выполненные, удаляет, напоминает
+    if not reply:
         reply = ask_ai(text, user_id)
 
-        if not reply:
-            if text.lower() in ['помощь', 'помоги', '!помощь', 'команды', 'help']:
-                reply = handle_help()
-        if not reply:
-            reply = handle_tasks(text, user_id)
-        if not reply:
-            reply = handle_reminder(text, user_id)
-        if not reply:
-            reply = handle_mimo(text, user_id)
-        if not reply:
-            if text.lower() not in ['помощь', 'помоги', '!помощь', 'команды', 'help']:
-                reply = 'Не понял. Напиши "помощь" для списка команд.'
-            else:
-                reply = handle_help()
+    # Запасной вариант — обычные команды
+    if not reply:
+        if text.lower() in ['помощь', 'помоги', '!помощь', 'команды', 'help']:
+            reply = handle_help()
+    if not reply:
+        reply = handle_tasks(text, user_id)
+    if not reply:
+        reply = handle_reminder(text, user_id)
+    if not reply:
+        reply = handle_mimo(text, user_id)
+    if not reply:
+        if text.lower() not in ['помощь', 'помоги', '!помощь', 'команды', 'help']:
+            reply = 'Не понял. Напиши "помощь" для списка команд.'
+        else:
+            reply = handle_help()
 
     # Сохраняем ответ бота
     save_message(user_id, 'assistant', reply)
