@@ -270,12 +270,12 @@ def handle_mimo(text, user_id):
     config = load_mimo_config()
 
     # Включение/выключение MiMo режима — ВСЕГДА работают
-    if t in ['мимо вкл', 'mimo on', 'мимо включить']:
+    if t in ['мимо вкл', 'mimo on', 'мимо включить', 'вкл мимо', 'включи мимо', 'включить мимо']:
         config['enabled'] = True
         save_mimo_config(config)
         return '🟢 MiMo Code включён!\n\nТеперь пиши задачи через "мимо [задача]".\nБосс Йоки молчит — работает только MiMo.'
 
-    if t in ['мимо выкл', 'mimo off', 'мимо отключить']:
+    if t in ['мимо выкл', 'mimo off', 'мимо отключить', 'выкл мимо', 'выключи мимо', 'отключи мимо']:
         config['enabled'] = False
         save_mimo_config(config)
         return '🔴 MiMo Code выключен.\n\nБосс Йоки снова работает! Пиши как обычно.'
@@ -580,10 +580,22 @@ def parse_reminder_time(text):
             remind_at = moscow_now + timedelta(minutes=amount)
         return remind_at, task_text
 
-    match = re.match(r'(?:напомни )?завтра (\d{1,2}[:\.]?\d{0,2}) (.+)', t)
+    # "завтра в 12:00 купить материал"
+    match = re.match(r'(?:напомни )?завтра в (\d{1,2}[:\.]?\d{0,2}) (.+)', t)
     if match:
         time_str = match.group(1).replace('.', ':')
         task_text = match.group(2)
+        if ':' not in time_str:
+            time_str += ':00'
+        h, m = map(int, time_str.split(':'))
+        remind_at = moscow_now.replace(hour=h, minute=m, second=0) + timedelta(days=1)
+        return remind_at, task_text
+
+    # "завтра купить материал в 12:00" (время в конце)
+    match = re.match(r'(?:напомни )?завтра (.+) в (\d{1,2}[:\.]?\d{0,2})$', t)
+    if match:
+        task_text = match.group(1)
+        time_str = match.group(2).replace('.', ':')
         if ':' not in time_str:
             time_str += ':00'
         h, m = map(int, time_str.split(':'))
@@ -862,6 +874,9 @@ def handle_tasks(text, user_id):
         pri_label = '🔴 Срочно' if priority == 'high' else '🟢 Потом' if priority == 'low' else '🟡 Важно'
         date_label = f" 📅 {deadline}" if deadline else ''
         return f'✅ Задача #{task_id}: {clean_title}\n{pri_label}{date_label}'
+
+    if t in ['что у меня по задачам', 'покажи задачи', 'какие задачи', 'что по задачам', 'мои задачи сейчас']:
+        return handle_tasks('задачи', user_id)
 
     if t.startswith('выполнено ') or t.startswith('сделано ') or t.startswith('выполни '):
         try:
