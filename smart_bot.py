@@ -27,6 +27,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 TOKEN = os.getenv('VK_TOKEN_MESSAGES')
 GROUP_ID = int(os.getenv('VK_GROUP_ID', '73303964'))
 GITHUB_KEY = os.getenv('GITHUB_TOKEN', os.getenv('GROQ_API_KEY'))
+GROQ_API_KEY = os.getenv('GROQ_API_KEY')
 VK_USER_ID = int(os.getenv('VK_USER_ID', '114439622'))
 SUPABASE_URL = os.getenv('SUPABASE_URL')
 SUPABASE_KEY = os.getenv('SUPABASE_KEY')
@@ -703,7 +704,7 @@ def get_tasks_context(user_id):
     return '\n'.join(lines)
 
 def ask_ai(text, user_id):
-    if not GITHUB_KEY:
+    if not GITHUB_KEY and not GROQ_API_KEY:
         return None
     try:
         context = get_tasks_context(user_id)
@@ -728,22 +729,48 @@ def ask_ai(text, user_id):
         # Обязательно передаём текущее сообщение пользователя!
         messages.append({'role': 'user', 'content': text})
 
-        r = requests.post(
-            'https://models.inference.ai.azure.com/chat/completions',
-            headers={
-                'Authorization': f'Bearer {GITHUB_KEY}',
-                'Content-Type': 'application/json'
-            },
-            json={
-                'model': 'gpt-4o-mini',
-                'messages': messages,
-                'max_tokens': 500,
-                'temperature': 0.7
-            },
-            timeout=15
-        )
-        data = r.json()
-        reply = data['choices'][0]['message']['content']
+        # Основной провайдер — Groq (рабочий, ключ проверен)
+        if GROQ_API_KEY:
+            r = requests.post(
+                'https://api.groq.com/openai/v1/chat/completions',
+                headers={
+                    'Authorization': f'Bearer {GROQ_API_KEY}',
+                    'Content-Type': 'application/json'
+                },
+                json={
+                    'model': 'llama-3.1-8b-instant',
+                    'messages': messages,
+                    'max_tokens': 500,
+                    'temperature': 0.7
+                },
+                timeout=20
+            )
+            data = r.json()
+            if r.status_code != 200 or 'choices' not in data:
+                log.error(f'GROQ AI error: {r.status_code} — {str(data)[:300]}')
+                return None
+            reply = data['choices'][0]['message']['content']
+        else:
+            # Запасной вариант — GitHub Models (может быть недоступен)
+            r = requests.post(
+                'https://models.inference.ai.azure.com/chat/completions',
+                headers={
+                    'Authorization': f'Bearer {GITHUB_KEY}',
+                    'Content-Type': 'application/json'
+                },
+                json={
+                    'model': 'gpt-4o-mini',
+                    'messages': messages,
+                    'max_tokens': 500,
+                    'temperature': 0.7
+                },
+                timeout=15
+            )
+            data = r.json()
+            if r.status_code != 200 or 'choices' not in data:
+                log.error(f'GitHub AI error: {r.status_code} — {str(data)[:300]}')
+                return None
+            reply = data['choices'][0]['message']['content']
 
         # Парсим команды AI
         parse_ai_actions(reply, user_id)
