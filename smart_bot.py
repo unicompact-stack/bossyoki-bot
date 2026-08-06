@@ -713,6 +713,8 @@ def ask_ai(text, user_id):
 
         messages = [{'role': 'system', 'content': system}]
         messages.extend(history)
+        # Обязательно передаём текущее сообщение пользователя!
+        messages.append({'role': 'user', 'content': text})
 
         r = requests.post(
             'https://models.inference.ai.azure.com/chat/completions',
@@ -1201,21 +1203,24 @@ def handle_message(event, api):
             reply = f'✅ Принято! Задача #{task_id} ушла в MiMo Code.\n\n«{text[:80]}»\n\n⏳ Результат пришлётся через ~5 мин.'
     else:
         # MiMo выключен — работаем как обычный бот
-        if text.lower() in ['помощь', 'помоги', '!помощь', 'команды', 'help']:
-            reply = handle_help()
+        # Сначала «живой» AI: понимает естественный язык, сам создаёт задачи,
+        # отмечает выполненные, удаляет, напоминает. Команды — запасной вариант.
+        reply = ask_ai(text, user_id)
+
+        if not reply:
+            if text.lower() in ['помощь', 'помоги', '!помощь', 'команды', 'help']:
+                reply = handle_help()
         if not reply:
             reply = handle_tasks(text, user_id)
         if not reply:
             reply = handle_reminder(text, user_id)
         if not reply:
             reply = handle_mimo(text, user_id)
-
-        # AI (если не распознана команда)
         if not reply:
-            reply = ask_ai(text, user_id)
-
-        if not reply:
-            reply = 'Не понял. Напиши "помощь" для списка команд.'
+            if text.lower() not in ['помощь', 'помоги', '!помощь', 'команды', 'help']:
+                reply = 'Не понял. Напиши "помощь" для списка команд.'
+            else:
+                reply = handle_help()
 
     # Сохраняем ответ бота
     save_message(user_id, 'assistant', reply)
