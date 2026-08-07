@@ -1294,6 +1294,7 @@ def handle_message(event, api):
 # === Health check + Dashboard для Render.com ===
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse
+import urllib.request
 
 PORT = int(os.getenv('PORT', '10000'))
 
@@ -1434,6 +1435,28 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 else:
                     self.send_response(400)
                     self.end_headers()
+            elif path == '/summary':
+                # AI-резюме для AI News Agent
+                news = body.get('news', [])
+                if not news:
+                    self.send_response(400)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({'error': 'No news'}).encode())
+                    return
+
+                summary = self._generate_ai_summary(news)
+                if summary:
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({'summary': summary}).encode())
+                else:
+                    self.send_response(500)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({'error': 'AI APIs failed'}).encode())
             else:
                 self.send_response(404)
                 self.end_headers()
@@ -1505,6 +1528,112 @@ class DashboardHandler(BaseHTTPRequestHandler):
         finally:
             conn.close()
         return {'messages': msgs, 'tasks': tasks, 'stats': stats}
+
+    def _generate_ai_summary(self, news_items):
+        """Генерирует AI-резюме «Главное за день» для AI News Agent."""
+        # Формируем список новостей
+        news_list = []
+        for i, item in enumerate(news_items[:15], 1):
+            cat = item.get('category', 'Другое')
+            score = item.get('score', 0)
+            news_list.append(f"{i}. [{cat}] {item['title']} (оценка: {score})")
+
+        news_text = "\n".join(news_list)
+
+        prompt = f"""Ты — AI-журналист. Напиши краткое резюме «Главное за день в ИИ» на русском языке.
+
+НОВОСТИ ЗА СЕГОДНЯ:
+{news_text}
+
+ФОРМАТ:
+- 3-5 предложений, общий обзор
+- Выдели 2-3 главные новости с пояснением почему они важны
+- Закончи выводом о трендах
+- Не используй эмодзи
+- Пиши простым языком, без канцелярита
+
+ТОЛЬКО ТЕКСТ, без заголовков и маркеров."""
+
+        # Пробуем API по очереди
+        for api_name, api_func in [
+            ('Groq', self._call_groq),
+            ('OpenRouter', self._call_openrouter),
+            ('GitHub Models', self._call_github_models),
+        ]:
+            result = api_func(prompt)
+            if result:
+                log.info(f'AI summary generated via {api_name}')
+                return result
+
+        return None
+
+    def _call_groq(self, prompt):
+        if not GROQ_API_KEY:
+            return None
+        try:
+            url = "https://api.groq.com/openai/v1/chat/completions"
+            payload = json.dumps({
+                "model": "llama-3.3-70b-versatile",
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 1000,
+                "temperature": 0.7,
+            }).encode()
+            req = urllib.request.Request(url, data=payload, headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+            })
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read())
+                return data["choices"][0]["message"]["content"]
+        except Exception as e:
+            log.error(f'Groq error: {e}')
+            return None
+
+    def _call_openrouter(self, prompt):
+        if not OPENROUTER_API_KEY:
+            return None
+        try:
+            url = "https://openrouter.ai/api/v1/chat/completions"
+            payload = json.dumps({
+                "model": "google/gemma-2-9b-it:free",
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 1000,
+                "temperature": 0.7,
+            }).encode()
+            req = urllib.request.Request(url, data=payload, headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "HTTP-Referer": "https://github.com/unicompact-stack/ai-news-agent",
+                "X-Title": "AI News Agent",
+            })
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read())
+                return data["choices"][0]["message"]["content"]
+        except Exception as e:
+            log.error(f'OpenRouter error: {e}')
+            return None
+
+    def _call_github_models(self, prompt):
+        if not GITHUB_KEY:
+            return None
+        try:
+            url = "https://models.inference.ai.azure.com/chat/completions"
+            payload = json.dumps({
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 1000,
+                "temperature": 0.7,
+            }).encode()
+            req = urllib.request.Request(url, data=payload, headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {GITHUB_KEY}",
+            })
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read())
+                return data["choices"][0]["message"]["content"]
+        except Exception as e:
+            log.error(f'GitHub Models error: {e}')
+            return None
 
     def log_message(self, format, *args):
         pass
