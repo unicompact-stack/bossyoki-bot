@@ -1297,6 +1297,7 @@ from urllib.parse import urlparse
 import urllib.request
 
 PORT = int(os.getenv('PORT', '10000'))
+LLM_PROXY_TOKEN = os.getenv('LLM_PROXY_TOKEN', 'dusya-proxy-2026')
 
 DASHBOARD_HTML = '''<!DOCTYPE html>
 <html lang="ru">
@@ -1457,6 +1458,63 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     self.send_header('Content-Type', 'application/json')
                     self.end_headers()
                     self.wfile.write(json.dumps({'error': 'AI APIs failed'}).encode())
+            elif path == '/api/llm':
+                # LLM proxy for Дуся (and other local services behind regional blocks)
+                auth = self.headers.get('Authorization', '')
+                if auth != f'Bearer {LLM_PROXY_TOKEN}':
+                    self.send_response(401)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({'ok': False, 'error': 'unauthorized'}).encode())
+                    return
+
+                provider = body.get('provider', 'openrouter')
+                model = body.get('model', '')
+                messages = body.get('messages', [])
+                max_tokens = body.get('max_tokens', 200)
+                temperature = body.get('temperature', 0.7)
+
+                if not messages:
+                    self.send_response(400)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({'ok': False, 'error': 'messages required'}).encode())
+                    return
+
+                try:
+                    reply = None
+                    used_model = model
+                    if provider == 'groq':
+                        reply = self._proxy_llm_call(
+                            'https://api.groq.com/openai/v1/chat/completions',
+                            GROQ_API_KEY,
+                            model or 'llama-3.1-8b-instant',
+                            messages, max_tokens, temperature,
+                        )
+                    else:
+                        reply = self._proxy_llm_call(
+                            'https://openrouter.ai/api/v1/chat/completions',
+                            OPENROUTER_API_KEY,
+                            model or 'openai/gpt-4o-mini',
+                            messages, max_tokens, temperature,
+                        )
+
+                    if reply:
+                        self.send_response(200)
+                        self.send_header('Content-Type', 'application/json')
+                        self.send_header('Access-Control-Allow-Origin', '*')
+                        self.end_headers()
+                        self.wfile.write(json.dumps({'ok': True, 'reply': reply, 'model': used_model}).encode())
+                    else:
+                        self.send_response(502)
+                        self.send_header('Content-Type', 'application/json')
+                        self.end_headers()
+                        self.wfile.write(json.dumps({'ok': False, 'error': 'LLM call failed'}).encode())
+                except Exception as e:
+                    self.send_response(500)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode())
             else:
                 self.send_response(404)
                 self.end_headers()
@@ -1633,6 +1691,28 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 return data["choices"][0]["message"]["content"]
         except Exception as e:
             log.error(f'GitHub Models error: {e}')
+            return None
+
+    def _proxy_llm_call(self, url, api_key, model, messages, max_tokens, temperature):
+        """Forward an LLM request to OpenRouter/Groq. Returns reply text or None."""
+        if not api_key:
+            return None
+        try:
+            payload = json.dumps({
+                'model': model,
+                'messages': messages,
+                'max_tokens': max_tokens,
+                'temperature': temperature,
+            }).encode()
+            req = urllib.request.Request(url, data=payload, headers={
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {api_key}',
+            })
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read())
+                return data['choices'][0]['message']['content']
+        except Exception as e:
+            log.error(f'LLM proxy error ({url}): {e}')
             return None
 
     def log_message(self, format, *args):
