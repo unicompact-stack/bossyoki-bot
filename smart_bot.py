@@ -404,6 +404,7 @@ def get_stats(user_id):
 
 _last_sync_time = 0
 _SYNC_INTERVAL = 30  # 30 секунд минимум
+_github_warned_once = False
 _github_loaded = False  # Блокировка до загрузки из GitHub
 
 def sync_to_github(force=False):
@@ -418,8 +419,7 @@ def sync_to_github(force=False):
     _last_sync_time = now
 
     if not GITHUB_KEY or not GITHUB_KEY.startswith('ghp_'):
-        log.warning('⚠️ GitHub токен не настроен')
-        return
+        return  # GitHub sync отключён — токен не задан
     try:
         conn = get_db()
         cur = conn.cursor()
@@ -1745,7 +1745,6 @@ def main():
     # Загружаем задачи из GitHub при старте
     load_from_github()
     _github_loaded = True
-    log.info('✅ GitHub загружен, sync разрешён')
 
     with open(PID_FILE, 'w') as f:
         f.write(str(os.getpid()))
@@ -1756,12 +1755,8 @@ def main():
 
     log.info(f'🚀 Бот запущен! Группа: {GROUP_ID}')
 
-    # Тестовое сообщение при старте — проверяем что VK работает
-    try:
-        send_vk_message(VK_USER_ID, '🟢 Бот запущен и готов к работе!')
-        log.info('✅ Тестовое сообщение отправлено')
-    except Exception as e:
-        log.error(f'❌ Тестовое сообщение не отправлено: {e}')
+    # Тестовое сообщение при старте — отключено (не спамить в VK)
+    log.info('ℹ️ Стартовое VK-сообщение отключено')
 
     # Health check для Render — ЗАПУСКАЕМ ПЕРВЫМ
     health_thread = threading.Thread(target=start_health_server, daemon=True)
