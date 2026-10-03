@@ -38,6 +38,11 @@ PID_FILE = os.path.join(DIR, 'smart_bot.pid')
 GITHUB_REPO = 'unicompact-stack/bossyoki'
 GITHUB_FILE = 'tasks.json'
 
+# Диагностика
+BOT_START_TIME = None
+LAST_DAIRY_CHECK = None
+DAIRY_ORDERS_PROCESSED = 0
+
 MOSCOW_TZ = pytz.timezone('Europe/Moscow')
 
 def get_moscow_now():
@@ -1170,9 +1175,11 @@ def send_evening_report(user_id):
 
 def check_dairy_orders():
     """Проверяет новые заказы КФХ Кенеш в Supabase и шлёт уведомления в VK"""
+    global LAST_DAIRY_CHECK, DAIRY_ORDERS_PROCESSED
     while True:
         conn = None
         try:
+            LAST_DAIRY_CHECK = datetime.now().isoformat()
             conn = get_db()
             cur = conn.cursor()
             cur.execute(
@@ -1222,6 +1229,7 @@ def check_dairy_orders():
                 # Помечаем заказ как уведомлённый
                 cur.execute('UPDATE kenesh_orders SET notified = TRUE WHERE id = %s', (order['id'],))
                 conn.commit()
+                DAIRY_ORDERS_PROCESSED += 1
                 log.info(f'✅ Уведомление о заказе #{order["id"]} отправлено')
         except Exception as e:
             log.error(f'Dairy orders check error: {e}')
@@ -1401,6 +1409,28 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self.send_header('Content-Type', 'application/json')
                 self.end_headers()
                 self.wfile.write(json.dumps({'status': 'ok'}).encode())
+            elif path == '/diag':
+                # Диагностика: когда бот стартовал, когда проверял заказы
+                import datetime
+                uptime = None
+                if BOT_START_TIME:
+                    try:
+                        start = datetime.datetime.fromisoformat(BOT_START_TIME)
+                        now = datetime.datetime.now()
+                        uptime = str(now - start)
+                    except:
+                        uptime = 'unknown'
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                diag = {
+                    'bot_start_time': BOT_START_TIME,
+                    'uptime': uptime,
+                    'last_dairy_check': LAST_DAIRY_CHECK,
+                    'dairy_orders_processed': DAIRY_ORDERS_PROCESSED,
+                    'server_time': datetime.datetime.now().isoformat(),
+                }
+                self.wfile.write(json.dumps(diag, ensure_ascii=False).encode('utf-8'))
             elif path == '/api/data':
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json; charset=utf-8')
@@ -1730,6 +1760,7 @@ def start_health_server():
 def main():
     global vk_session_ref
     global _github_loaded
+    global BOT_START_TIME
 
     def stop(sig, frame):
         log.info('Остановлен.')
@@ -1740,6 +1771,7 @@ def main():
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
 
+    BOT_START_TIME = datetime.now().isoformat()
     init_db()
 
     # Загружаем задачи из GitHub при старте
