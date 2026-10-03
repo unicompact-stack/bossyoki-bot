@@ -1787,8 +1787,12 @@ def main():
 
     log.info(f'🚀 Бот запущен! Группа: {GROUP_ID}')
 
-    # Тестовое сообщение при старте — отключено (не спамить в VK)
-    log.info('ℹ️ Стартовое VK-сообщение отключено')
+    # Стартовое сообщение — показывает когда бот проснулся
+    try:
+        send_vk_message(VK_USER_ID, '🟢 Бот проснулся! (Render Keep-Alive)')
+        log.info('✅ Стартовое сообщение отправлено')
+    except Exception as e:
+        log.error(f'❌ Стартовое сообщение не отправлено: {e}')
 
     # Health check для Render — ЗАПУСКАЕМ ПЕРВЫМ
     health_thread = threading.Thread(target=start_health_server, daemon=True)
