@@ -1074,28 +1074,52 @@ def periodic_sync():
 
 # === Автоотчёт утром и вечером ===
 
-_report_sent_today = {}
+_report_sent_file = os.path.join(DIR, '.reports_sent.json')
+
+def _load_sent_reports():
+    """Загружает из файла какие отчёты уже отправлены (переживает рестарт)"""
+    try:
+        with open(_report_sent_file) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def _mark_report_sent(key):
+    """Помечает отчёт как отправленный в файле"""
+    try:
+        data = _load_sent_reports()
+        data[key] = True
+        # Чистим старые записи (старше 7 дней)
+        cutoff = (get_moscow_now() - timedelta(days=7)).strftime('%Y-%m-%d')
+        data = {k: v for k, v in data.items() if k[:10] >= cutoff}
+        with open(_report_sent_file, 'w') as f:
+            json.dump(data, f)
+    except Exception as e:
+        log.error(f'Не удалось сохранить отметку об отчёте: {e}')
 
 def check_daily_report():
-    """Отправляет отчёт утром (9:00) и вечером (21:00)"""
+    """Отправляет отчёт утром (с 9:00) и вечером (с 21:00).
+    Широкое окно: если бот проснулся после 9:00 — отправит сразу, не пропустит."""
     while True:
         try:
             now = get_moscow_now()
             today = now.strftime('%Y-%m-%d')
             hour = now.hour
-            minute = now.minute
+            sent = _load_sent_reports()
 
-            # Утренний отчёт в 9:00 (окно 9:00-9:02)
+            # Утренний отчёт: окно 9:00–11:59
             morning_key = f'{today}_morning'
-            if hour == 9 and minute < 3 and morning_key not in _report_sent_today:
-                _report_sent_today[morning_key] = True
+            if 9 <= hour < 12 and morning_key not in sent:
+                _mark_report_sent(morning_key)
                 send_morning_report(VK_USER_ID)
+                log.info(f'☀️ Утренний отчёт отправлен в {now.strftime("%H:%M")}')
 
-            # Вечерний отчёт в 21:00 (окно 21:00-21:02)
+            # Вечерний отчёт: окно 21:00–23:59
             evening_key = f'{today}_evening'
-            if hour == 21 and minute < 3 and evening_key not in _report_sent_today:
-                _report_sent_today[evening_key] = True
+            if hour >= 21 and evening_key not in sent:
+                _mark_report_sent(evening_key)
                 send_evening_report(VK_USER_ID)
+                log.info(f'🌙 Вечерний отчёт отправлен в {now.strftime("%H:%M")}')
 
         except Exception as e:
             log.error(f'Daily report error: {e}')
@@ -1428,6 +1452,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     'uptime': uptime,
                     'last_dairy_check': LAST_DAIRY_CHECK,
                     'dairy_orders_processed': DAIRY_ORDERS_PROCESSED,
+                    'reports_sent_today': _load_sent_reports(),
                     'server_time': datetime.datetime.now().isoformat(),
                 }
                 self.wfile.write(json.dumps(diag, ensure_ascii=False).encode('utf-8'))
