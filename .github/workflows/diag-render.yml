@@ -1,0 +1,29 @@
+name: Diag Render
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Health
+        run: |
+          echo "=== /health ==="
+          curl -sS -m 60 -w "\nHTTP:%{http_code} time:%{time_total}\n" https://bossyoki-bot.onrender.com/health
+
+      - name: Diag JSON
+        run: |
+          echo "=== /diag ==="
+          curl -sS -m 60 -w "\nHTTP:%{http_code} time:%{time_total}\n" https://bossyoki-bot.onrender.com/diag
+
+      - name: Root headers
+        run: |
+          echo "=== / headers ==="
+          curl -sS -m 60 -D - -o /dev/null https://bossyoki-bot.onrender.com/ || true
+
+      - name: API data (first 1500 chars)
+        run: |
+          echo "=== /api/data ==="
+          curl -sS -m 60 https://bossyoki-bot.onrender.com/api/data | head -c 1500
+          echo ""
