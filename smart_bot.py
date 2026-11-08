@@ -19,10 +19,29 @@ import pytz
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 import vk_api
-from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 from vk_api.utils import get_random_id
 
 load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
+
+
+_thread_local = threading.local()
+
+
+def get_session():
+    """Отдельная requests.Session на каждый поток.
+
+    requests.Session не потокобезопасен: общая сессия из 5 потоков
+    портит пул соединений. Плюс гарантируем таймаут по умолчанию,
+    иначе запрос к VK может висеть вечно (случалось 25.10 и 29.10.2026).
+    """
+    s = getattr(_thread_local, 'session', None)
+    if s is None:
+        s = requests.Session()
+        adapter = requests.adapters.HTTPAdapter(pool_connections=4, pool_maxsize=8, max_retries=0)
+        s.mount('https://', adapter)
+        s.mount('http://', adapter)
+        _thread_local.session = s
+    return s
 
 TOKEN = os.getenv('VK_TOKEN_MESSAGES')
 GROUP_ID = int(os.getenv('VK_GROUP_ID', '73303964'))
@@ -68,14 +87,46 @@ logging.basicConfig(
 )
 log = logging.getLogger('smart_bot')
 
-VERSION = '2.3.0'
-BUILD_TIME = '04.08.2026 22:15'
+VERSION = '2.3.1'
+BUILD_TIME = '08.11.2026 21:00'
+
+
+# === Watchdog: защита от зависших потоков ===
+THREAD_BEATS = {}
+_beats_lock = threading.Lock()
+
+
+def heartbeat(name):
+    """Отмечает активность фонового потока."""
+    with _beats_lock:
+        THREAD_BEATS[name] = time.time()
+
+
+def watchdog(timeout_seconds=900):
+    """Перезапускает процесс, если какой-то поток завис дольше timeout_seconds.
+
+    Render перезапустит контейнер автоматически, и бот снова оживёт.
+    Без этого бот «онлайн» (health 200), но сообщения не обрабатывает.
+    """
+    while True:
+        time.sleep(60)
+        now = time.time()
+        with _beats_lock:
+            beats = dict(THREAD_BEATS)
+        for name, ts in beats.items():
+            stuck = now - ts
+            if stuck > timeout_seconds:
+                log.error(f'💀 Поток "{name}" завис {int(stuck)} сек — принудительный рестарт')
+                logging.shutdown()
+                os._exit(1)
 
 
 # === БД ===
 
 def get_db():
-    conn = psycopg2.connect(SUPABASE_KEY)
+    # connect_timeout обязателен: без него при недоступном пулере
+    # psycopg2.connect() ждёт бесконечно и вешает поток.
+    conn = psycopg2.connect(SUPABASE_KEY, connect_timeout=10)
     conn.autocommit = False
     return conn
 
@@ -1029,17 +1080,31 @@ def handle_help():
 vk_session_ref = None
 
 def send_vk_message(user_id, text):
-    """Отправляет сообщение через VK API"""
+    """Отправляет сообщение через VK API (с таймаутом, разбивает длинные тексты)."""
+    if not text:
+        return False
+    if not TOKEN:
+        log.error('❌ VK токен не задан (VK_TOKEN_MESSAGES)')
+        return False
     try:
-        if not vk_session_ref:
-            log.error('❌ VK сессия не инициализирована')
-            return False
-        api = vk_session_ref.get_api()
-        api.messages.send(
-            user_id=user_id,
-            message=text,
-            random_id=get_random_id()
-        )
+        for chunk in [text[i:i + 4000] for i in range(0, len(text), 4000)]:
+            params = {
+                'user_id': user_id,
+                'message': chunk,
+                'random_id': get_random_id(),
+                'access_token': TOKEN,
+                'v': '5.131',
+            }
+            resp = get_session().post(
+                'https://api.vk.com/method/messages.send',
+                data=params,
+                timeout=30,
+            )
+            data = resp.json()
+            if 'error' in data:
+                err = data['error']
+                log.error(f'❌ VK send error {err.get("error_code")}: {err.get("error_msg")}')
+                return False
         log.info(f'📤 VK сообщение отправлено: {text[:50]}...')
         return True
     except Exception as e:
@@ -1050,6 +1115,7 @@ def check_reminders():
     """Проверяет напоминания каждую минуту"""
     while True:
         try:
+            heartbeat('reminders')
             pending = get_pending_reminders()
             if pending:
                 log.info(f'📋 Найдено {len(pending)} напоминаний')
@@ -1066,6 +1132,7 @@ def periodic_sync():
     """Синхронизация с GitHub каждые 5 минут"""
     while True:
         try:
+            heartbeat('sync')
             sync_to_github(force=True)
         except Exception as e:
             log.error(f'Periodic sync error: {e}')
@@ -1102,24 +1169,31 @@ def check_daily_report():
     Широкое окно: если бот проснулся после 9:00 — отправит сразу, не пропустит."""
     while True:
         try:
+            heartbeat('reports')
             now = get_moscow_now()
             today = now.strftime('%Y-%m-%d')
             hour = now.hour
             sent = _load_sent_reports()
 
             # Утренний отчёт: окно 9:00–11:59
+            # ВАЖНО: отметку ставим ТОЛЬКО после успешной отправки,
+            # иначе при сбое VK отчёт теряется навсегда.
             morning_key = f'{today}_morning'
             if 9 <= hour < 12 and morning_key not in sent:
-                _mark_report_sent(morning_key)
-                send_morning_report(VK_USER_ID)
-                log.info(f'☀️ Утренний отчёт отправлен в {now.strftime("%H:%M")}')
+                if send_morning_report(VK_USER_ID):
+                    _mark_report_sent(morning_key)
+                    log.info(f'☀️ Утренний отчёт отправлен в {now.strftime("%H:%M")}')
+                else:
+                    log.warning('☀️ Утренний отчёт не доставлен — попробую снова через минуту')
 
             # Вечерний отчёт: окно 21:00–23:59
             evening_key = f'{today}_evening'
             if hour >= 21 and evening_key not in sent:
-                _mark_report_sent(evening_key)
-                send_evening_report(VK_USER_ID)
-                log.info(f'🌙 Вечерний отчёт отправлен в {now.strftime("%H:%M")}')
+                if send_evening_report(VK_USER_ID):
+                    _mark_report_sent(evening_key)
+                    log.info(f'🌙 Вечерний отчёт отправлен в {now.strftime("%H:%M")}')
+                else:
+                    log.warning('🌙 Вечерний отчёт не доставлен — попробую снова через минуту')
 
         except Exception as e:
             log.error(f'Daily report error: {e}')
@@ -1153,8 +1227,9 @@ def send_morning_report(user_id):
     lines.append('\n💪 Давай, ты сможешь!')
 
     msg = '\n'.join(lines)
-    send_vk_message(user_id, msg)
-    log.info('☀️ Утренний отчёт отправлен')
+    ok = send_vk_message(user_id, msg)
+    log.info(f'☀️ Утренний отчёт: {"отправлен" if ok else "НЕ отправлен"}')
+    return ok
 
 
 def send_evening_report(user_id):
@@ -1191,8 +1266,9 @@ def send_evening_report(user_id):
         lines.append('\n💪 Завтра обязательно получится!')
 
     msg = '\n'.join(lines)
-    send_vk_message(user_id, msg)
-    log.info('🌙 Вечерний отчёт отправлен')
+    ok = send_vk_message(user_id, msg)
+    log.info(f'🌙 Вечерний отчёт: {"отправлен" if ok else "НЕ отправлен"}')
+    return ok
 
 
 # === Уведомления о заказах КФХ Кенеш ===
@@ -1203,6 +1279,7 @@ def check_dairy_orders():
     while True:
         conn = None
         try:
+            heartbeat('dairy')
             LAST_DAIRY_CHECK = datetime.now().isoformat()
             conn = get_db()
             cur = conn.cursor()
@@ -1265,12 +1342,11 @@ def check_dairy_orders():
 
 # === Обработка сообщений ===
 
-def handle_message(event, api):
-    text = event.obj.message['text'].strip()
-    user_id = event.obj.message['from_id']
-
+def build_reply(text, user_id):
+    """Строит ответ на сообщение. Отправкой занимается longpoll_worker."""
+    text = (text or '').strip()
     if not text:
-        return
+        return None
 
     # Сохраняем сообщение пользователя
     save_message(user_id, 'user', text)
@@ -1312,13 +1388,7 @@ def handle_message(event, api):
 
     # Сохраняем ответ бота
     save_message(user_id, 'assistant', reply)
-
-    api.messages.send(
-        user_id=user_id,
-        message=reply,
-        random_id=get_random_id()
-    )
-    log.info(f'→ {user_id}: {reply[:100]}')
+    return reply
 
 
 # === Запуск ===
@@ -1782,6 +1852,84 @@ def start_health_server():
         print(f'Dashboard server error: {e}', flush=True)
 
 
+def vk_api_call(method, params=None, timeout=30):
+    """Вызывает метод VK API с таймаутом. Возвращает (ok, data_or_error)."""
+    p = dict(params or {})
+    p['access_token'] = TOKEN
+    p['v'] = '5.131'
+    try:
+        resp = get_session().post(f'https://api.vk.com/method/{method}', data=p, timeout=timeout)
+        data = resp.json()
+    except Exception as e:
+        return False, f'transport: {e}'
+    if 'error' in data:
+        err = data['error']
+        return False, f'{err.get("error_code")}: {err.get("error_msg")}'
+    return True, data.get('response')
+
+
+def longpoll_worker():
+    """Собственный LongPoll-цикл: каждые wait-секунды возвращает управление,
+    поэтому watchdog видит активность и поток не может зависнуть навсегда."""
+    backoff = 3
+    while True:
+        # 1. Получаем адрес сервера LongPoll
+        ok, data = vk_api_call('groups.getLongPollServer', {'group_id': GROUP_ID})
+        if not ok:
+            log.error(f'❌ getLongPollServer: {data} — retry через {backoff} сек')
+            time.sleep(backoff)
+            backoff = min(backoff * 2, 60)
+            continue
+
+        server, key, ts = data.get('server'), data.get('key'), data.get('ts')
+        if not (server and key and ts):
+            log.error(f'❌ Некорректный ответ getLongPollServer: {data}')
+            time.sleep(backoff)
+            continue
+
+        log.info('📡 LongPoll подключён, слушаю события')
+        backoff = 3
+
+        # 2. Слушаем события, пока сервер не попросит сменить key/ts
+        while True:
+            heartbeat('longpoll')
+            url = f'{server}?act=a_check&key={key}&ts={ts}&wait=25'
+            try:
+                resp = get_session().get(url, timeout=40)
+                data = resp.json()
+            except Exception as e:
+                log.error(f'🔌 LongPoll сеть: {e} — переподключение')
+                time.sleep(5)
+                break
+
+            if data.get('failed'):
+                code = data['failed']
+                if code == 1:
+                    ts = data.get('ts', ts)
+                    continue
+                log.warning(f'⚠️ LongPoll failed={code} — переполучение key/ts')
+                time.sleep(1)
+                break
+
+            ts = data.get('ts', ts)
+            for upd in data.get('updates') or []:
+                try:
+                    if upd.get('type') != 'message_new':
+                        continue
+                    msg = (upd.get('object') or {}).get('message') or {}
+                    text = (msg.get('text') or '').strip()
+                    user_id = msg.get('from_id')
+                    if not text or not user_id:
+                        continue
+                    log.info(f'← {user_id}: {text[:120]}')
+                    reply = build_reply(text, user_id)
+                    if reply:
+                        send_vk_message(user_id, reply)
+                        log.info(f'→ {user_id}: {reply[:100]}')
+                except Exception as e:
+                    log.error(f'⚠️ Ошибка обработки события: {e}')
+
+
 def main():
     global vk_session_ref
     global _github_loaded
@@ -1808,21 +1956,16 @@ def main():
 
     vk_session = vk_api.VkApi(token=TOKEN)
     vk_session_ref = vk_session
-    longpoll = VkBotLongPoll(vk_session, GROUP_ID, wait=45)
 
-    log.info(f'🚀 Бот запущен! Группа: {GROUP_ID}')
-
-    # Стартовое сообщение — показывает когда бот проснулся
-    try:
-        send_vk_message(VK_USER_ID, '🟢 Бот проснулся! (Render Keep-Alive)')
-        log.info('✅ Стартовое сообщение отправлено')
-    except Exception as e:
-        log.error(f'❌ Стартовое сообщение не отправлено: {e}')
+    log.info(f'🚀 Бот запущен! Группа: {GROUP_ID} (v{VERSION})')
 
     # Health check для Render — ЗАПУСКАЕМ ПЕРВЫМ
     health_thread = threading.Thread(target=start_health_server, daemon=True)
     health_thread.start()
     log.info(f'✅ Health check на порту {PORT}')
+
+    # Стартовое сообщение — показывает когда бот проснулся
+    send_vk_message(VK_USER_ID, f'🟢 Бот проснулся! v{VERSION}')
 
     # Фоновые потоки
     threading.Thread(target=check_reminders, daemon=True).start()
@@ -1831,27 +1974,11 @@ def main():
     threading.Thread(target=check_dairy_orders, daemon=True).start()
     log.info('🧀 Проверка заказов КФХ Кенеш запущена')
 
-    # Защита от сетевых ошибок VK — если LongPoll упал, перезапускаем бота
-    while True:
-        try:
-            for event in longpoll.listen():
-                if event.type == VkBotEventType.MESSAGE_NEW:
-                    text = event.obj.message.get('text', '').strip()
-                    user_id = event.obj.message['from_id']
+    # Watchdog: если какой-то поток завис > 15 минут — рестарт процесса
+    threading.Thread(target=watchdog, daemon=True).start()
 
-                    if not text:
-                        continue
-
-                    log.info(f'← {user_id}: {text}')
-                    handle_message(event, vk_session.get_api())
-        except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError) as e:
-            log.error(f'🔌 Сетевая ошибка VK: {e} — перезапускаю LongPoll через 5 сек')
-            time.sleep(5)
-            longpoll = VkBotLongPoll(vk_session, GROUP_ID, wait=45)
-        except Exception as e:
-            log.error(f'⚠️ Ошибка LongPoll: {e} — перезапускаю через 5 сек')
-            time.sleep(5)
-            longpoll = VkBotLongPoll(vk_session, GROUP_ID, wait=45)
+    # Основной поток — LongPoll
+    longpoll_worker()
 
 
 if __name__ == '__main__':
